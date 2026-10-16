@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: tap_to_pay
+    ports:
+      - "55000:5432"
+    volumes:
+      # named volume: the buyer's grant token survives `docker compose down`
+      - pgdata:/var/lib/postgresql
+
+volumes:
+  pgdata:
