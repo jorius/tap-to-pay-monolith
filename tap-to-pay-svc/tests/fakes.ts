@@ -13,7 +13,7 @@ import type {
 import type { DayRange } from '../src/services/limits.js';
 import type { Amount } from '../src/services/money.js';
 import type { Deps } from '../src/services/sales.js';
-import type { OpenPayments, RotatedToken, WalletInfo } from '../src/open-payments/types.js';
+import type { OpenPayments, Quote, RotatedToken, WalletInfo } from '../src/open-payments/types.js';
 
 /** Pinned so fixture sales always fall inside the same Bogotá day, whatever the real date. */
 export const NOW = new Date('2026-10-14T15:00:00Z');
@@ -66,13 +66,18 @@ export class FakeRepo implements Repo {
     return vendor;
   }
 
+  /** A sale with a buyer defaults its debit to its own amount and asset, as a same-asset claim does. */
   addSale(overrides: Partial<SaleRow> & { vendorId: string }): SaleRow {
+    const claimed = overrides.buyerId != null;
     const sale: SaleRow = {
       id: this.id('s'),
       buyerId: null,
       amount: 1000n,
       assetCode: 'USD',
       assetScale: 2,
+      debitAmount: claimed ? (overrides.amount ?? 1000n) : null,
+      debitAssetCode: claimed ? (overrides.assetCode ?? 'USD') : null,
+      debitAssetScale: claimed ? (overrides.assetScale ?? 2) : null,
       status: 'AWAITING_TAP',
       incomingPaymentUrl: null,
       quoteId: null,
@@ -147,7 +152,7 @@ export class FakeRepo implements Repo {
         s.createdAt >= range.start &&
         s.createdAt < range.end
       ) {
-        total += s.amount;
+        total += s.debitAmount ?? 0n;
       }
     }
     return total;
@@ -174,6 +179,8 @@ type Script = {
   /** receivedAmount per read, in order; an Error is thrown. Once empty, reads report the full amount. */
   received: Array<bigint | Error>;
   completed: boolean;
+  /** What the quote debits, in the buyer wallet's asset. Default: the incoming amount (1:1). */
+  quoteDebit?: bigint;
   /** Thrown by the next outgoing payment calls, in order. */
   outgoingFailures: Error[];
   rotateFails: boolean;
@@ -220,10 +227,15 @@ export class FakeOpenPayments implements OpenPayments {
     return url;
   }
 
-  async createQuote(_buyer: WalletInfo, receiverUrl: string) {
+  async createQuote(buyer: WalletInfo, receiverUrl: string): Promise<Quote> {
     this.calls.push(`quote:${receiverUrl}`);
     if (this.script.failOn.quote) throw this.script.failOn.quote;
-    return `quote-${++this.seq}`;
+    return {
+      id: `quote-${++this.seq}`,
+      debitAmount: this.script.quoteDebit ?? this.incomingAmounts.get(receiverUrl) ?? 0n,
+      assetCode: buyer.assetCode,
+      assetScale: buyer.assetScale,
+    };
   }
 
   async createOutgoingPayment(buyer: WalletInfo, quoteId: string, accessToken: string) {

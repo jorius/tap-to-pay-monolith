@@ -5,7 +5,6 @@ export type SaleStatus = 'AWAITING_TAP' | 'CHARGING' | 'PAID' | 'FAILED';
 export type SaleFailureCode =
   | 'BUYER_UNKNOWN'
   | 'GRANT_MISSING'
-  | 'ASSET_MISMATCH'
   | 'LIMIT_PER_PAYMENT'
   | 'LIMIT_DAILY'
   | 'WALLET_ERROR';
@@ -29,6 +28,11 @@ export type SaleView = {
   assetCode: string;
   assetScale: number;
   status: SaleStatus;
+  /** What the buyer pays in the buyer's own asset; null until known (cross-asset sales learn it from the quote). */
+  debitAmount: string | null;
+  debitAmountFormatted: string | null;
+  debitAssetCode: string | null;
+  debitAssetScale: number | null;
   failureCode: string | null;
   failureMessage: string | null;
   createdAt: string;

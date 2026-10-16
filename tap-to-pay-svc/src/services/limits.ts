@@ -4,10 +4,8 @@ import { formatAmount } from './money.js';
 
 export type ChargeCheck = { ok: true } | { ok: false; code: SaleFailureCode; message: string };
 
-type SaleTerms = { amount: bigint; assetCode: string; assetScale: number };
-
-/** The five rules of SDD section 7, in order. Pure: no I/O, so a refusal makes no wallet call. */
-export function canCharge(buyer: BuyerRow | null, sale: SaleTerms, spentToday: bigint): ChargeCheck {
+/** The card is known and its buyer has authorized the service. Pure, no wallet call. */
+export function checkBuyer(buyer: BuyerRow | null): ChargeCheck {
   if (!buyer) return { ok: false, code: 'BUYER_UNKNOWN', message: 'Card not registered' };
   if (!buyer.grantAccessToken || !buyer.grantManageUrl) {
     return {
@@ -16,29 +14,34 @@ export function canCharge(buyer: BuyerRow | null, sale: SaleTerms, spentToday: b
       message: "Buyer hasn't authorized this terminal (run npm run grant:buyer)",
     };
   }
-  if (buyer.assetCode !== sale.assetCode || buyer.assetScale !== sale.assetScale) {
-    return {
-      ok: false,
-      code: 'ASSET_MISMATCH',
-      message: `Buyer pays in ${buyer.assetCode}, vendor charges in ${sale.assetCode}`,
-    };
-  }
-  if (sale.amount > buyer.perPaymentLimit) {
+  return { ok: true };
+}
+
+/**
+ * Both caps, inclusive. `debit` is what the buyer pays in the buyer's own asset: the sale amount
+ * when both wallets share an asset, else the quote's debitAmount.
+ */
+export function checkLimits(buyer: BuyerRow, debit: bigint, spentToday: bigint): ChargeCheck {
+  if (debit > buyer.perPaymentLimit) {
     return {
       ok: false,
       code: 'LIMIT_PER_PAYMENT',
-      message: `Over the per-payment limit (max ${formatAmount(buyer.perPaymentLimit, buyer.assetScale)})`,
+      message: `Over the per-payment limit (max ${formatAmount(buyer.perPaymentLimit, buyer.assetScale)} ${buyer.assetCode})`,
     };
   }
-  if (spentToday + sale.amount > buyer.dailyLimit) {
+  if (spentToday + debit > buyer.dailyLimit) {
     const left = remainingToday(buyer.dailyLimit, spentToday);
     return {
       ok: false,
       code: 'LIMIT_DAILY',
-      message: `Over today's limit (${formatAmount(left, buyer.assetScale)} left)`,
+      message: `Over today's limit (${formatAmount(left, buyer.assetScale)} ${buyer.assetCode} left)`,
     };
   }
   return { ok: true };
+}
+
+export function sameAsset(buyer: BuyerRow, sale: { assetCode: string; assetScale: number }): boolean {
+  return buyer.assetCode === sale.assetCode && buyer.assetScale === sale.assetScale;
 }
 
 export function remainingToday(dailyLimit: bigint, spentToday: bigint): bigint {

@@ -47,6 +47,9 @@ model Sale {
   amount             BigInt
   assetCode          String
   assetScale         Int
+  debitAmount        BigInt?
+  debitAssetCode     String?
+  debitAssetScale    Int?
   status             SaleStatus @default(AWAITING_TAP)
   incomingPaymentUrl String?
   quoteId            String?

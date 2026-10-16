@@ -60,7 +60,12 @@ class SdkOpenPayments implements OpenPayments {
         { url: buyer.resourceServer, accessToken },
         { walletAddress: buyer.id, receiver: receiverUrl, method: 'ilp' },
       );
-      return quote.id;
+      return {
+        id: quote.id,
+        debitAmount: BigInt(quote.debitAmount.value),
+        assetCode: quote.debitAmount.assetCode,
+        assetScale: quote.debitAmount.assetScale,
+      };
     });
   }
 

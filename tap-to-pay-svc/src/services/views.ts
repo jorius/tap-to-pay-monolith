@@ -15,6 +15,13 @@ export function saleView(sale: SaleRow, vendorName?: string): SaleView {
     assetCode: sale.assetCode,
     assetScale: sale.assetScale,
     status: sale.status,
+    debitAmount: sale.debitAmount === null ? null : sale.debitAmount.toString(),
+    debitAmountFormatted:
+      sale.debitAmount === null || sale.debitAssetScale === null
+        ? null
+        : formatAmount(sale.debitAmount, sale.debitAssetScale),
+    debitAssetCode: sale.debitAssetCode,
+    debitAssetScale: sale.debitAssetScale,
     failureCode: sale.failureCode,
     failureMessage: sale.failureMessage,
     createdAt: sale.createdAt.toISOString(),
