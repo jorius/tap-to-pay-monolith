@@ -6,7 +6,11 @@
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "db:migrate": "prisma migrate dev",
+    "db:generate": "prisma generate",
+    "seed": "tsx scripts/seed.ts",
+    "grant:buyer": "tsx scripts/grant-buyer.ts"
   },
   "dependencies": {
     "@interledger/open-payments": "7.4.0",
