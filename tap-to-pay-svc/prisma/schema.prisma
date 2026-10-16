@@ -1,0 +1,60 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum SaleStatus {
+  AWAITING_TAP
+  CHARGING
+  PAID
+  FAILED
+}
+
+model Buyer {
+  id               String   @id @default(cuid())
+  name             String
+  walletAddress    String   @unique
+  assetCode        String
+  assetScale       Int
+  perPaymentLimit  BigInt
+  dailyLimit       BigInt
+  grantAccessToken String?
+  grantManageUrl   String?
+  createdAt        DateTime @default(now())
+  sales            Sale[]
+}
+
+model Vendor {
+  id            String   @id @default(cuid())
+  name          String
+  walletAddress String   @unique
+  assetCode     String
+  assetScale    Int
+  createdAt     DateTime @default(now())
+  sales         Sale[]
+}
+
+model Sale {
+  id                 String     @id @default(cuid())
+  vendorId           String
+  vendor             Vendor     @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  buyerId            String?
+  buyer              Buyer?     @relation(fields: [buyerId], references: [id], onDelete: SetNull)
+  amount             BigInt
+  assetCode          String
+  assetScale         Int
+  status             SaleStatus @default(AWAITING_TAP)
+  incomingPaymentUrl String?
+  quoteId            String?
+  outgoingPaymentUrl String?
+  failureCode        String?
+  failureMessage     String?
+  createdAt          DateTime   @default(now())
+  paidAt             DateTime?
+
+  @@index([buyerId, status, createdAt])
+}
