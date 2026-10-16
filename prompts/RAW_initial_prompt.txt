@@ -1,0 +1,5 @@
+We're going to work on the SDD.md file within this monolith repository, we need to make some changes before planning and executing it, so:
+
+  - Change the current diagram from line 99 to 122 in SDD.md to a mermaid one
+  - Folder structure will be tap-to-pay-monolith will contain both express with typescript service and the react native app as independant folders
+  - Once the above changes are done, we're going to plan and execute only the scaffolding for both repositories
