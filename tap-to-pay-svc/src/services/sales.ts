@@ -5,10 +5,11 @@ import {
   isUnauthorized,
   toWalletError,
   type OpenPayments,
+  type Quote,
   type WalletInfo,
 } from '../open-payments/types.js';
 import { HttpError } from './errors.js';
-import { canCharge, dayRange } from './limits.js';
+import { checkBuyer, checkLimits, dayRange, sameAsset, type ChargeCheck } from './limits.js';
 import { parseAmount, toAmount } from './money.js';
 import { saleView } from './views.js';
 
@@ -47,29 +48,33 @@ export async function chargeSale(deps: Deps, saleId: string, walletAddress: stri
   // shortcut: the card answers a fixed address, so a forged card can charge it within its limits.
   const buyer = await repo.getBuyerByWallet(walletAddress);
 
-  // 4. The rules, before any wallet call.
-  const spentToday = buyer ? await repo.sumSpent(buyer.id, dayRange(deps.now(), deps.timeZone)) : 0n;
-  const check = canCharge(buyer, sale, spentToday);
-  if (!check.ok) {
-    const failed = await repo.transitionSale(saleId, 'AWAITING_TAP', {
-      status: 'FAILED',
-      failureCode: check.code,
-      failureMessage: check.message,
-    });
-    if (!failed) throw alreadyTaken();
-    return saleView(failed);
+  // 4. The rules. Card and grant always come before any wallet call; so do the caps when both
+  // wallets share an asset. In another asset the caps wait for the quote, which knows the debit.
+  const buyerCheck = checkBuyer(buyer);
+  if (!buyerCheck.ok) return refuse(repo, saleId, buyerCheck);
+  const payer = buyer!;
+  const spentToday = await repo.sumSpent(payer.id, dayRange(deps.now(), deps.timeZone));
+  const crossAsset = !sameAsset(payer, sale);
+  if (!crossAsset) {
+    const limits = checkLimits(payer, sale.amount, spentToday);
+    if (!limits.ok) return refuse(repo, saleId, limits);
   }
 
-  // 5. The claim. From here the amount counts toward the buyer's day.
+  // 5. The claim. From here the debit counts toward the buyer's day (a cross-asset one once quoted).
   // shortcut: the sum above runs outside a lock, so two sales at the same instant can both pass the cap.
-  let current = await repo.transitionSale(saleId, 'AWAITING_TAP', { status: 'CHARGING', buyerId: buyer!.id });
+  let current = await repo.transitionSale(saleId, 'AWAITING_TAP', {
+    status: 'CHARGING',
+    buyerId: payer.id,
+    ...(crossAsset
+      ? {}
+      : { debitAmount: sale.amount, debitAssetCode: sale.assetCode, debitAssetScale: sale.assetScale }),
+  });
   if (!current) throw alreadyTaken();
-  const payer = buyer!;
   const fail = (err: unknown) => failSale(deps, saleId, err);
 
   // 6 and 7. Incoming payment on the vendor's wallet, quote on the buyer's.
   let buyerWallet: WalletInfo;
-  let quoteId: string;
+  let quote: Quote;
   try {
     const vendor = await repo.getVendor(sale.vendorId);
     if (!vendor) throw new Error(`Vendor ${sale.vendorId} not found`);
@@ -80,11 +85,34 @@ export async function chargeSale(deps: Deps, saleId: string, walletAddress: stri
       toAmount(sale.amount, sale.assetCode, sale.assetScale),
     );
     current = await repo.updateSale(saleId, { incomingPaymentUrl });
-    quoteId = await op.createQuote(buyerWallet, incomingPaymentUrl);
-    current = await repo.updateSale(saleId, { quoteId });
+    quote = await op.createQuote(buyerWallet, incomingPaymentUrl);
+    current = await repo.updateSale(saleId, { quoteId: quote.id });
   } catch (err) {
     return fail(err);
   }
+
+  // 7b. Cross-asset: the caps against what the quote debits, still before any money moves.
+  if (crossAsset) {
+    const limits = checkLimits(payer, quote.debitAmount, spentToday);
+    if (!limits.ok) {
+      const failed = await repo.transitionSale(saleId, 'CHARGING', {
+        status: 'FAILED',
+        failureCode: limits.code,
+        failureMessage: limits.message,
+      });
+      return saleView(failed ?? current);
+    }
+    try {
+      current = await repo.updateSale(saleId, {
+        debitAmount: quote.debitAmount,
+        debitAssetCode: quote.assetCode,
+        debitAssetScale: quote.assetScale,
+      });
+    } catch (err) {
+      return fail(err);
+    }
+  }
+  const quoteId = quote.id;
 
   // 8. The payment, rotating the stored token once on 401 or 403.
   let outgoingPaymentUrl: string;
@@ -153,6 +181,17 @@ async function failSale(deps: Deps, saleId: string, err: unknown): Promise<SaleV
     failureMessage: message,
   });
   return saleView(failed ?? (await loadSale(deps.repo, saleId)));
+}
+
+/** A rule refused before the claim: no wallet call was made and nothing counts toward the day. */
+async function refuse(repo: Repo, saleId: string, check: ChargeCheck & { ok: false }): Promise<SaleView> {
+  const failed = await repo.transitionSale(saleId, 'AWAITING_TAP', {
+    status: 'FAILED',
+    failureCode: check.code,
+    failureMessage: check.message,
+  });
+  if (!failed) throw alreadyTaken();
+  return saleView(failed);
 }
 
 async function loadSale(repo: Repo, saleId: string): Promise<SaleRow> {

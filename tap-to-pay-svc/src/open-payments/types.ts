@@ -8,6 +8,8 @@ export type WalletInfo = {
   assetScale: number;
 };
 
+export type Quote = { id: string; debitAmount: bigint; assetCode: string; assetScale: number };
+
 export type RotatedToken = { value: string; manage: string };
 
 /** Everything the service asks of the wallets. Services depend on this, never on the SDK. */
@@ -15,8 +17,8 @@ export interface OpenPayments {
   getWalletAddress(url: string): Promise<WalletInfo>;
   /** Returns the incoming payment URL. */
   createIncomingPayment(vendor: WalletInfo, amount: Amount): Promise<string>;
-  /** Returns the quote id. */
-  createQuote(buyer: WalletInfo, receiverUrl: string): Promise<string>;
+  /** The quote id and what it debits from the buyer, in the buyer's asset. */
+  createQuote(buyer: WalletInfo, receiverUrl: string): Promise<Quote>;
   /** Returns the outgoing payment URL. */
   createOutgoingPayment(buyer: WalletInfo, quoteId: string, accessToken: string): Promise<string>;
   rotateToken(manageUrl: string, accessToken: string): Promise<RotatedToken>;

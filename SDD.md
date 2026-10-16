@@ -53,7 +53,6 @@ Small vendors in Latin American markets cannot afford a card terminal, and buyer
 - Login, signup, KYC or KYB. Identity is a seeded list of buyers and vendors; KYC belongs to the wallet provider.
 - iOS. Apple grants host card emulation only to approved payment developers in listed regions, and Colombia is not one.
 - Offline payments, refunds, settlement reports, push notifications.
-- Cross-currency sales. A buyer whose wallet asset differs from the vendor's is refused with a clear message.
 - Production security: the API has no authentication and the grant token is stored in plain text. Section 11 lists each shortcut and when to remove it.
 
 **Success criterion**: two clean end-to-end runs in a row on two phones against the Test Wallet, plus the refusal cases in the outcome matrix (section 13).
@@ -242,7 +241,7 @@ Production wires `new PrismaRepo(prisma)`, `createOpenPayments(cfg)`, the real c
 
 **The `Repo` interface**: `listVendors`, `getVendor`, `listBuyers`, `getBuyer`, `getBuyerByWallet`, `updateBuyerLimits`, `updateBuyerGrant`, `createSale`, `getSale`, `updateSale`, `transitionSale(id, from, patch) → row | null`, `sumSpent(buyerId, range) → bigint`, `listBuyerSales(buyerId, limit)`.
 
-**The rules** (`canCharge`, pure): in order, card registered (`BUYER_UNKNOWN`), grant present (`GRANT_MISSING`), buyer asset equals sale asset (`ASSET_MISMATCH`), `amount ≤ perPaymentLimit` (`LIMIT_PER_PAYMENT`), `spentToday + amount ≤ dailyLimit` (`LIMIT_DAILY`). Both boundaries inclusive. A refused rule makes no wallet call and never counts toward the day.
+**The rules** (`checkBuyer` and `checkLimits`, pure): in order, card registered (`BUYER_UNKNOWN`), grant present (`GRANT_MISSING`), `debit ≤ perPaymentLimit` (`LIMIT_PER_PAYMENT`), `spentToday + debit ≤ dailyLimit` (`LIMIT_DAILY`). Both boundaries inclusive. `debit` is what the buyer pays in the buyer's own asset: the sale amount when both wallets share an asset, else the quote's `debitAmount`. Any asset pair is accepted. A same-asset refusal makes no wallet call; a cross-asset cap refusal happens after the quote and before the outgoing payment, so no money moves. A refusal never counts toward the day.
 
 **The Open Payments client** (`createOpenPayments`): `createAuthenticatedClient({ walletAddressUrl, keyId, privateKey, requestTimeoutMs: 15000 })` signs every request. Non-interactive `incoming-payment` and `quote` grants are requested on every charge and never cached; a grant that comes back pending is an error (*Wallet asked for interaction on a quote grant*). `incomingPayment.getPublic` reads the vendor's incoming payment without a token. SDK errors become one `WalletError` whose message is the wallet's `description`, else the error message, else *Wallet request failed*.
 
@@ -296,7 +295,7 @@ Index `(buyerId, status, createdAt)` serves the daily sum.
 ```mermaid
 stateDiagram-v2
     [*] --> AWAITING_TAP: POST /sales (vendor asset)
-    AWAITING_TAP --> FAILED: a rule refuses (BUYER_UNKNOWN, GRANT_MISSING, ASSET_MISMATCH, LIMIT_*)
+    AWAITING_TAP --> FAILED: a rule refuses (BUYER_UNKNOWN, GRANT_MISSING, LIMIT_*)
     AWAITING_TAP --> CHARGING: rules pass, conditional claim, buyerId set, amount reserved
     CHARGING --> FAILED: wallet 4xx before the outgoing payment (WALLET_ERROR), amount released
     CHARGING --> PAID: receivedAmount covers the sale, paidAt set
@@ -309,10 +308,10 @@ stateDiagram-v2
 
 **Today**: the calendar day in `DAILY_LIMIT_TZ` (default `America/Bogota`, UTC−5, no daylight saving). `dayRange(now, zone)` returns the UTC instants of local midnight and the next local midnight, correct on daylight-saving days (23 or 25 hours), by reading the zone offset with `Intl.DateTimeFormat(…, { timeZoneName: 'longOffset' })` and making one correction pass. A sale counts toward the day it was created.
 
-**The daily sum**: `spentToday` = sum of `amount` over the buyer's sales with status in (`CHARGING`, `PAID`) and `createdAt` inside today's range. `FAILED` never counts, so a wallet error releases its amount; `CHARGING` counts, so a charge in flight reserves it. `remainingToday = max(dailyLimit − spentToday, 0)`.
+**The daily sum**: `spentToday` = sum of `debitAmount` (the buyer's asset) over the buyer's sales with status in (`CHARGING`, `PAID`) and `createdAt` inside today's range. `FAILED` never counts, so a wallet error releases its amount; `CHARGING` counts, so a charge in flight reserves it. `remainingToday = max(dailyLimit − spentToday, 0)`.
 
 ```sql
-SELECT COALESCE(SUM(amount), 0) FROM "Sale"
+SELECT COALESCE(SUM("debitAmount"), 0) FROM "Sale"
 WHERE "buyerId" = $1 AND status IN ('CHARGING', 'PAID')
   AND "createdAt" >= $2 AND "createdAt" < $3;
 ```
@@ -337,7 +336,7 @@ Nine JSON endpoints on port 4000, one envelope, no authentication. Every respons
 
 **Views** (built in the service's `src/services/views.ts`, mirrored in the app's `src/api/types.ts`)
 
-- `SaleView`: `id`, `vendorId`, `vendorName?` (only from `POST /sales` and the buyer's history), `buyerId | null`, `amount`, `amountFormatted`, `assetCode`, `assetScale`, `status`, `failureCode | null`, `failureMessage | null`, `createdAt`, `paidAt | null`. Wallet URLs are never returned.
+- `SaleView`: `id`, `vendorId`, `vendorName?` (only from `POST /sales` and the buyer's history), `buyerId | null`, `amount`, `amountFormatted`, `assetCode`, `assetScale`, `debitAmount | null`, `debitAmountFormatted | null`, `debitAssetCode | null`, `debitAssetScale | null` (what the buyer pays, in the buyer's asset), `status`, `failureCode | null`, `failureMessage | null`, `createdAt`, `paidAt | null`. Wallet URLs are never returned.
 - `BuyerView`: `id`, `name`, `walletAddress`, `assetCode`, `assetScale`, `perPaymentLimit`, `dailyLimit`, `spentToday`, `remainingToday`, `hasGrant`. The token is never returned.
 - `VendorView`: `id`, `name`, `walletAddress`, `assetCode`, `assetScale`.
 - `Health`: `{ ok: boolean, clientWalletAddress: string }`. `BuyerSales`: `{ remainingToday, sales }`.
@@ -360,9 +359,8 @@ Exact validation messages: `amount must be digits in the smallest unit, got "12.
 | --- | --- | --- | --- | --- |
 | `BUYER_UNKNOWN` | 1st | *Card not registered* | none | no |
 | `GRANT_MISSING` | 2nd | *Buyer hasn't authorized this terminal (run npm run grant:buyer)* | none | no |
-| `ASSET_MISMATCH` | 3rd | *Buyer pays in EUR, vendor charges in USD* | none | no |
-| `LIMIT_PER_PAYMENT` | 4th | *Over the per-payment limit (max 20.00)* | none | no |
-| `LIMIT_DAILY` | 5th | *Over today's limit (10.00 left)* | none | no |
+| `LIMIT_PER_PAYMENT` | 3rd | *Over the per-payment limit (max 20.00 USD)* | none; cross-asset: incoming payment and quote | no |
+| `LIMIT_DAILY` | 4th | *Over today's limit (10.00 USD left)* | none; cross-asset: incoming payment and quote | no |
 | `WALLET_ERROR` | after the claim | the wallet's `description`, else the error message, else *Wallet request failed* | some | no, released |
 
 ## 10. Flows
@@ -404,7 +402,7 @@ sequenceDiagram
 1. Vendor types the amount and presses *Charge*. The app checks NFC is present and on, calls `POST /sales`; the sale is `AWAITING_TAP` in the vendor's asset. The app turns reader mode on.
 2. The tap. The terminal sends `SELECT AID`; the buyer's `HostApduService` answers the stored wallet address plus `9000`. The reader emits `onCard { payload }`; the app stops the reader and calls `POST /sales/:id/charge`.
 3. The service loads the sale (`404` if unknown, `409` if not `AWAITING_TAP`) and the buyer by wallet address.
-4. Rules in order: buyer exists, grant stored, assets match, per-payment cap, daily cap (`sumSpent` over today). A refusal writes `FAILED` with the code and message, conditionally on `AWAITING_TAP`, and answers `200`. No wallet call has been made.
+4. Rules in order: buyer exists, grant stored, then, when both wallets share an asset, per-payment cap and daily cap (`sumSpent` over today). A refusal writes `FAILED` with the code and message, conditionally on `AWAITING_TAP`, and answers `200`. No wallet call has been made. When the assets differ, the caps are checked after step 7 against the quote's `debitAmount`; a refusal there writes `FAILED` before any outgoing payment.
 5. The claim: `transitionSale(id, 'AWAITING_TAP', { status: 'CHARGING', buyerId })`. `null` means another request won: `409 Sale was already taken`. From here the amount is reserved against the daily cap.
 6. Vendor side, signed: `walletAddress.get(vendor)`, a non-interactive `incoming-payment` grant at the vendor's auth server, `incomingPayment.create` on the vendor's resource server with `incomingAmount` = the sale amount. The URL is stored on the sale.
 7. Buyer side, signed: `walletAddress.get(buyer)`, a non-interactive `quote` grant, `quote.create` with `receiver` = the incoming payment and `method: 'ilp'`. The quote id is stored.
@@ -423,7 +421,7 @@ Any wallet error between the claim and the outgoing payment, and a `4xx` on the 
 | 3 | sale not `AWAITING_TAP` | `409 SALE_NOT_CHARGEABLE` *Sale is PAID* | unchanged | | none |
 | 4 | no buyer with this address | `200` | `FAILED BUYER_UNKNOWN` | untouched | none |
 | 4 | no grant token or manage URL | `200` | `FAILED GRANT_MISSING` | untouched | none |
-| 4 | buyer asset differs from the vendor's | `200` | `FAILED ASSET_MISMATCH` | untouched | none |
+| 7 | cross-asset: the quote's `debitAmount` is over a cap | `200` | `FAILED LIMIT_*` | released | incoming payment and quote; no outgoing payment |
 | 4 | over the per-payment cap | `200` | `FAILED LIMIT_PER_PAYMENT` | untouched | none |
 | 4 | over the daily cap | `200` | `FAILED LIMIT_DAILY` | untouched | none |
 | 5 | another request claimed first | `409` *Sale was already taken* | the winner's | | none by this request |
@@ -600,7 +598,7 @@ Each entry: what was decided, why, what it costs. Keep or change them on purpose
 7. **`incomingPayment.getPublic` decides completion.** No extra grant per poll. Cost: no `completed` flag, `receivedAmount` optional in the type.
 8. **No persistence in the app beyond the HCE payload.** Nothing to clear between runs. Cost: pick the role again after every restart.
 9. **Amounts as digit strings in the smallest unit.** Open Payments amounts already are; floats lose cents; JSON has no bigint. Cost: the UI types `1200` for 12.00.
-10. **Refuse mismatched assets.** Caps are in the buyer's currency; comparing across currencies would be wrong. Cost: buyer and vendor must share an asset. Upgrade: compare the quote's `debitAmount` against the caps.
+10. **Any asset pair is accepted.** Caps are in the buyer's asset, so a cross-asset sale is checked against the quote's `debitAmount`, which is also what the daily sum adds up. Cost: a cross-asset cap refusal comes after the incoming payment and quote, leaving an unpaid incoming payment on the vendor wallet; the Test Wallet must have liquidity for the pair.
 11. **Injectable clock in tests**, including the fake repo. Daily-cap tests otherwise break when the date moves.
 12. **A polling error never fails a sale.** Once the outgoing payment exists, failing the sale would release an amount that is moving. A timeout or `5xx` on the outgoing payment also leaves `CHARGING`.
 13. **Conditional status transitions** for the claim and every `→ FAILED`; the loser of a race gets `409`.

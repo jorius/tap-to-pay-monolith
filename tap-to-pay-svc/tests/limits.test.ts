@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { BuyerRow } from '../src/db/repos.js';
-import { canCharge, dayRange, remainingToday } from '../src/services/limits.js';
+import { checkBuyer, checkLimits, dayRange, remainingToday, sameAsset } from '../src/services/limits.js';
 
 const buyer: BuyerRow = {
   id: 'b1',
@@ -14,16 +14,14 @@ const buyer: BuyerRow = {
   grantManageUrl: 'https://auth.test/token',
   createdAt: new Date(),
 };
-const sale = (amount: bigint) => ({ amount, assetCode: 'USD', assetScale: 2 });
 
-describe('canCharge', () => {
-  it('allows within and exactly at both caps', () => {
-    expect(canCharge(buyer, sale(1200n), 0n)).toEqual({ ok: true });
-    expect(canCharge(buyer, sale(2000n), 3000n)).toEqual({ ok: true });
+describe('checkBuyer', () => {
+  it('passes a known buyer with a grant', () => {
+    expect(checkBuyer(buyer)).toEqual({ ok: true });
   });
 
   it('refuses an unknown card', () => {
-    expect(canCharge(null, sale(1n), 0n)).toMatchObject({ code: 'BUYER_UNKNOWN', message: 'Card not registered' });
+    expect(checkBuyer(null)).toMatchObject({ code: 'BUYER_UNKNOWN', message: 'Card not registered' });
   });
 
   it('refuses without a token or a manage URL', () => {
@@ -31,33 +29,41 @@ describe('canCharge', () => {
       code: 'GRANT_MISSING',
       message: "Buyer hasn't authorized this terminal (run npm run grant:buyer)",
     };
-    expect(canCharge({ ...buyer, grantAccessToken: null }, sale(1n), 0n)).toMatchObject(expected);
-    expect(canCharge({ ...buyer, grantManageUrl: null }, sale(1n), 0n)).toMatchObject(expected);
+    expect(checkBuyer({ ...buyer, grantAccessToken: null })).toMatchObject(expected);
+    expect(checkBuyer({ ...buyer, grantManageUrl: null })).toMatchObject(expected);
+  });
+});
+
+describe('checkLimits', () => {
+  it('allows within and exactly at both caps', () => {
+    expect(checkLimits(buyer, 1200n, 0n)).toEqual({ ok: true });
+    expect(checkLimits(buyer, 2000n, 3000n)).toEqual({ ok: true });
   });
 
-  it('refuses mismatched assets', () => {
-    expect(canCharge({ ...buyer, assetCode: 'EUR' }, sale(1n), 0n)).toMatchObject({
-      code: 'ASSET_MISMATCH',
-      message: 'Buyer pays in EUR, vendor charges in USD',
-    });
-  });
-
-  it('refuses over the per-payment cap', () => {
-    expect(canCharge(buyer, sale(2001n), 0n)).toMatchObject({
+  it("refuses over the per-payment cap, in the buyer's asset", () => {
+    expect(checkLimits(buyer, 2001n, 0n)).toMatchObject({
       code: 'LIMIT_PER_PAYMENT',
-      message: 'Over the per-payment limit (max 20.00)',
+      message: 'Over the per-payment limit (max 20.00 USD)',
     });
   });
 
   it('refuses over the daily cap', () => {
-    expect(canCharge(buyer, sale(1200n), 4000n)).toMatchObject({
+    expect(checkLimits(buyer, 1200n, 4000n)).toMatchObject({
       code: 'LIMIT_DAILY',
-      message: "Over today's limit (10.00 left)",
+      message: "Over today's limit (10.00 USD left)",
     });
   });
 
   it('checks the per-payment cap before the daily cap', () => {
-    expect(canCharge(buyer, sale(2500n), 5000n)).toMatchObject({ code: 'LIMIT_PER_PAYMENT' });
+    expect(checkLimits(buyer, 2500n, 5000n)).toMatchObject({ code: 'LIMIT_PER_PAYMENT' });
+  });
+});
+
+describe('sameAsset', () => {
+  it('compares code and scale', () => {
+    expect(sameAsset(buyer, { assetCode: 'USD', assetScale: 2 })).toBe(true);
+    expect(sameAsset(buyer, { assetCode: 'EUR', assetScale: 2 })).toBe(false);
+    expect(sameAsset(buyer, { assetCode: 'USD', assetScale: 9 })).toBe(false);
   });
 });
 

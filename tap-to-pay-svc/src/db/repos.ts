@@ -32,6 +32,10 @@ export type SaleRow = {
   amount: bigint;
   assetCode: string;
   assetScale: number;
+  /** What the buyer pays, in the buyer's asset; the daily cap sums this. */
+  debitAmount: bigint | null;
+  debitAssetCode: string | null;
+  debitAssetScale: number | null;
   status: SaleStatus;
   incomingPaymentUrl: string | null;
   quoteId: string | null;
@@ -65,7 +69,7 @@ export interface Repo {
   updateSale(id: string, patch: SalePatch): Promise<SaleRow>;
   /** Applies `patch` only if the sale is still `from`; the row if it did, null otherwise. */
   transitionSale(id: string, from: SaleStatus, patch: SalePatch): Promise<SaleRow | null>;
-  /** Sum of CHARGING and PAID sales of the buyer created inside `range`. */
+  /** Sum of debitAmount over CHARGING and PAID sales of the buyer created inside `range`. */
   sumSpent(buyerId: string, range: DayRange): Promise<bigint>;
   listBuyerSales(buyerId: string, limit: number): Promise<SaleWithVendor[]>;
 }
@@ -138,14 +142,14 @@ export class PrismaRepo implements Repo {
 
   async sumSpent(buyerId: string, range: DayRange) {
     const { _sum } = await this.db.sale.aggregate({
-      _sum: { amount: true },
+      _sum: { debitAmount: true },
       where: {
         buyerId,
         status: { in: ['CHARGING', 'PAID'] },
         createdAt: { gte: range.start, lt: range.end },
       },
     });
-    return _sum.amount ?? 0n;
+    return _sum.debitAmount ?? 0n;
   }
 
   async listBuyerSales(buyerId: string, limit: number) {

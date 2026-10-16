@@ -42,9 +42,6 @@ try {
 
   console.log(`buyer  ${buyer.id}  ${buyer.name}  ${buyer.assetCode}/${buyer.assetScale}`);
   console.log(`vendor ${vendor.id}  ${vendor.name}  ${vendor.assetCode}/${vendor.assetScale}`);
-  if (buyer.assetCode !== vendor.assetCode) {
-    console.warn('Warning: buyer and vendor assets differ; every charge will fail with ASSET_MISMATCH.');
-  }
 } finally {
   await prisma.$disconnect();
 }
