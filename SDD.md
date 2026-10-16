@@ -6,30 +6,31 @@ The idea in one line: **the vendor's Android phone is the terminal, the buyer's 
 
 Contents
 
-1. [Purpose and scope](#1-purpose-and-scope)
-2. [Problem, goals and non-goals](#2-problem-goals-and-non-goals)
-3. [Actors and the three wallet addresses](#3-actors-and-the-three-wallet-addresses)
-4. [Monorepo layout and architecture](#4-monorepo-layout-and-architecture)
-5. [Tech stack](#5-tech-stack)
-6. [Mobile app design](#6-mobile-app-design)
-7. [Service design](#7-service-design)
-8. [Data model](#8-data-model)
-9. [API contract](#9-api-contract)
-10. [Flows](#10-flows)
-11. [Security and trust boundaries](#11-security-and-trust-boundaries)
-12. [Configuration and environment](#12-configuration-and-environment)
-13. [Testing strategy](#13-testing-strategy)
-14. [Developer workflow](#14-developer-workflow)
-15. [Decisions and known limitations](#15-decisions-and-known-limitations)
-16. [Build order for the event](#16-build-order-for-the-event)
-17. [AI usage declaration](#17-ai-usage-declaration)
-18. [Prompt pack](#18-prompt-pack)
+- [Tap to Pay: Software Design Document](#tap-to-pay-software-design-document)
+  - [1. Purpose and scope](#1-purpose-and-scope)
+  - [2. Problem, goals and non-goals](#2-problem-goals-and-non-goals)
+  - [3. Actors and the three wallet addresses](#3-actors-and-the-three-wallet-addresses)
+  - [4. Monorepo layout and architecture](#4-monorepo-layout-and-architecture)
+  - [5. Tech stack](#5-tech-stack)
+  - [6. Mobile app design](#6-mobile-app-design)
+  - [7. Service design](#7-service-design)
+  - [8. Data model](#8-data-model)
+  - [9. API contract](#9-api-contract)
+  - [10. Flows](#10-flows)
+  - [11. Security and trust boundaries](#11-security-and-trust-boundaries)
+  - [12. Configuration and environment](#12-configuration-and-environment)
+  - [13. Testing strategy](#13-testing-strategy)
+  - [14. Developer workflow](#14-developer-workflow)
+  - [15. Decisions and known limitations](#15-decisions-and-known-limitations)
+  - [16. Build order for the event](#16-build-order-for-the-event)
+  - [17. AI usage declaration](#17-ai-usage-declaration)
+  - [18. Prompt pack](#18-prompt-pack)
 
 ---
 
 ## 1. Purpose and scope
 
-This document is the complete design of the tap-to-pay system, written so a team of two can rebuild it from an empty repository in one day. It distils two practice repositories built on 14 and 15 October 2026 (`tap-to-pay-svc`, an Express service, and `tap-to-pay-poc`, an Expo Android app) into one monorepo design. The practice code is excluded from the hackathon submission: the rules require every line of submission code to be written during the event, so this document carries the knowledge, not the code.
+This document is the complete design of the tap-to-pay system, written (`tap-to-pay-svc`, an Express with TypeScript service, and `tap-to-pay-app`, an Expo Android app) into one monorepo design. The practice code is excluded from the hackathon submission: the rules require every line of submission code to be written during the event, so this document carries the knowledge, not the code.
 
 It covers the product idea, the parties and their wallet addresses, the monorepo layout, the exact tech stack, both applications, the data model, the HTTP contract, the per-sale flow with every failure, security boundaries, configuration, tests, the two-phone developer workflow, the decisions made and their costs, a build order with hours, the AI usage declaration, and the ordered prompts that drive the rebuild.
 
@@ -37,7 +38,7 @@ Out of scope: login and signup, KYC (done by the wallet provider), iOS (Apple re
 
 ## 2. Problem, goals and non-goals
 
-Small vendors in Latin American markets cannot afford a card terminal, and buyers increasingly carry a phone, not cash. Open Payments gives every wallet a public address and a standard way for a third party to be authorised to move money from it. Tap to pay turns any two Android phones into a terminal and a card on top of that standard, with no card network and no hardware.
+Small vendors in Latin American markets cannot afford a card terminal, and buyers increasingly carry a phone, not cash. Open Payments gives every wallet a public address and a standard way for a third party to be authorized to move money from it. Tap to pay turns any two Android phones (with NFC capabilities) into a terminal and a card on top of that standard, with no card network and no hardware.
 
 **Goals**
 
@@ -45,9 +46,9 @@ Small vendors in Latin American markets cannot afford a card terminal, and buyer
 2. The buyer stays in control with limits set once: a per-payment cap and a daily cap, enforced before any wallet call, with clear refusal messages on the vendor screen.
 3. Consent is given once, not per sale: a single interactive outgoing-payment grant, then every tap is silent for both parties.
 4. The backend is the only source of truth: phones are untrusted, render what the service answers, and never hold keys or tokens.
-5. Rebuildable in one day by two people from this document, with the service unit-tested against fakes and the app verified on two phones.
+5. Re-buildable in one day from this document, with the service unit-tested against fakes and the app verified on two phones.
 
-**Non-goals for the hackathon build**
+**Non-goals for the Hackathon build**
 
 - Login, signup, KYC or KYB. Identity is a seeded list of buyers and vendors; KYC belongs to the wallet provider.
 - iOS. Apple grants host card emulation only to approved payment developers in listed regions, and Colombia is not one.
@@ -78,7 +79,7 @@ Colour convention for every diagram and the app's buttons: buyer side teal `#0E9
 One repository, two applications and one shared package, managed with npm workspaces. The practice build had two repositories and mirrored the API types by hand; the shared package removes that duplication and is the only structural change from the PoC.
 
 ```
-tap-to-pay/
+tap-to-pay-monolith/
   package.json              npm workspaces: apps/*, packages/*
   docker-compose.yml        PostgreSQL on localhost:55000
   docs/                     SDD.md (this file), AI_USAGE.md, prompts/ (the prompt log)
@@ -131,7 +132,7 @@ Versions are the ones that worked together in the practice repos on Node 20.20.2
 | --- | --- | --- | --- |
 | Language | TypeScript, strict, ES modules | 5.9.3 service, 6.0.x app | one language across the monorepo |
 | Monorepo tooling | npm workspaces | npm 10.8.2 | already installed; no extra tool to learn in a day |
-| Service runtime | Node.js | 20.20.2 | LTS on the laptop |
+| Service runtime | Node.js | 24.22.0 | LTS on the laptop |
 | HTTP | Express | 5.3.0 | async handlers forward rejections to the error handler, so routes need no try/catch |
 | Validation | zod | 4.6.7 | one schema per route body and one for the environment |
 | ORM and migrations | Prisma, `prisma-client` generator, `@prisma/adapter-pg` | 7.10.0 | typed queries and migrations; the adapter is mandatory in Prisma 7 |
@@ -146,8 +147,6 @@ Versions are the ones that worked together in the practice repos on Node 20.20.2
 | Android build | JDK 17 from Homebrew, Android SDK, adb with wireless debugging | openjdk 17.0.20 | Android Studio's bundled JDK 25 breaks the native build |
 | Phones | two Android phones with NFC; the buyer's must list `android.hardware.nfc.hce` | Android 15 and 16 tested | the emulator has no NFC; a Moto G06 has no NFC at all |
 | Hosting for the demo | Railway or similar for the service and Postgres | — | phones off the laptop's Wi-Fi; HTTPS also satisfies Android's cleartext rule in release builds |
-
-Deliberately not used: NestJS (ceremony for nine endpoints), a shared NFC library (none emulates a card), Expo Go (cannot load native modules), webhooks (need a public URL during development), WebSockets (polling is enough at this scale).
 
 ## 6. Mobile app design
 
