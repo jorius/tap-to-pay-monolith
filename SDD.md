@@ -30,7 +30,7 @@ Contents
 
 ## 1. Purpose and scope
 
-This document is the complete design of the tap-to-pay system, written (`tap-to-pay-svc`, an Express with TypeScript service, and `tap-to-pay-app`, an Expo Android app) into one monorepo design. The practice code is excluded from the hackathon submission: the rules require every line of submission code to be written during the event, so this document carries the knowledge, not the code.
+This document is the complete design of the tap-to-pay system: one repository holding two independent applications, `tap-to-pay-svc`, an Express with TypeScript service, and `tap-to-pay-app`, an Expo Android app. The practice code is excluded from the hackathon submission: the rules require every line of submission code to be written during the event, so this document carries the knowledge, not the code.
 
 It covers the product idea, the parties and their wallet addresses, the monorepo layout, the exact tech stack, both applications, the data model, the HTTP contract, the per-sale flow with every failure, security boundaries, configuration, tests, the two-phone developer workflow, the decisions made and their costs, a build order with hours, the AI usage declaration, and the ordered prompts that drive the rebuild.
 
@@ -76,53 +76,66 @@ Colour convention for every diagram and the app's buttons: buyer side teal `#0E9
 
 ## 4. Monorepo layout and architecture
 
-One repository, two applications and one shared package, managed with npm workspaces. The practice build had two repositories and mirrored the API types by hand; the shared package removes that duplication and is the only structural change from the PoC.
+One repository, two independent applications side by side. Each folder has its own `package.json`, lockfile, `node_modules`, `.gitignore`, `.env` and scripts; there is no root `package.json`, no npm workspaces and no shared package, so either folder installs, runs, tests and deploys on its own. The cost is that the view types of section 9 are written in both applications and kept in step by hand, as in the practice build.
 
 ```
 tap-to-pay-monolith/
-  package.json              npm workspaces: apps/*, packages/*
-  docker-compose.yml        PostgreSQL on localhost:55000
-  docs/                     SDD.md (this file), AI_USAGE.md, prompts/ (the prompt log)
-  packages/contracts/       plain TypeScript types shared by both apps: SaleView, BuyerView,
-                            VendorView, SaleStatus, the failure codes. No build step.
-  apps/api/                 the service: Express 5, Prisma 7, Open Payments SDK, Vitest
+  SDD.md                    this file
+  AI_USAGE.md, prompts/     the AI usage declaration and the prompt log (section 17)
+  tap-to-pay-svc/           the service: Express 5, Prisma 7, Open Payments SDK, Vitest
+    package.json  docker-compose.yml (PostgreSQL on localhost:55000)  .env.example
     src/{app,server,config}.ts  src/routes/  src/services/  src/db/  src/open-payments/
-    prisma/  scripts/{seed,grant-buyer}.ts  tests/  .env.example
-  apps/mobile/              the Expo SDK 57 Android app
+    prisma/  scripts/{seed,grant-buyer}.ts  tests/
+  tap-to-pay-app/           the Expo SDK 57 Android app
+    package.json  app.json  .env.example (EXPO_PUBLIC_API_URL)
     src/app/ (Expo Router)  src/api/  src/hooks/  src/components/  src/constants/
     modules/nfc-tap/        the Kotlin Expo Module: HceCardService + reader
-    .env.example            EXPO_PUBLIC_API_URL
 ```
 
 The only contract between the two apps is HTTP JSON (section 9). The service owns every rule; the app renders. Neither phone ever calls a wallet.
 
-```
-  Buyer phone (teal)                                   Vendor phone (orange)
-  HceCardService answers the wallet address            NfcTap reader mode (/vendor/sale)
-  even with the app closed, screen on
-        │   ◄──── NFC, no network: SELECT AID F0494150415901 ───  │
-        │   ───── answer: wallet address + 9000 ─────────────────► │
-        │                                                          │
-        │ HTTP JSON over Wi-Fi                                     │ HTTP JSON over Wi-Fi
-        │ GET /buyers, /buyers/:id, /buyers/:id/sales              │ GET /vendors, POST /sales,
-        │ PATCH /buyers/:id/limits                                 │ POST /sales/:id/charge, GET /sales/:id
-        ▼                                                          ▼
-  ┌──────────────── apps/api (violet) · http://<laptop-LAN-IP>:4000 ───────────────────────┐
-  │ routes (zod) → services (rules + charge orchestration) → views { data, error }           │
-  │ Repo (Prisma) and OpenPayments (SDK) behind interfaces, so tests inject fakes            │
-  │ holds the buyer's grant token; signs every wallet call with private.key; never holds money│
-  └──────────────┬──────────────────────────────────────────────┬───────────────────────────┘
-                 │ SQL                                          │ Open Payments over HTTPS
-                 ▼                                              │ (HTTP message signatures + GNAP tokens)
-        Postgres (grey) localhost:55000              ┌──────────┴───────────┐
-        Buyer, Vendor, Sale                          ▼                      ▼
-                                             Buyer's wallet (indigo)   Vendor's wallet (red)
-                                             grant, quote,             incoming payment
-                                             outgoing payment
-                                                     └──── Interledger (gold) settles ────┘
+```mermaid
+%%{init: {"flowchart": {"wrappingWidth": 640}}}%%
+flowchart TB
+    subgraph phones ["tap-to-pay-app on two Android phones"]
+        direction LR
+        BP["<b>Buyer phone</b>, the card<br/>HceCardService answers the wallet address<br/>even with the app closed, screen on<br/><br/>GET /buyers, /buyers/:id, /buyers/:id/sales<br/>PATCH /buyers/:id/limits"]
+        VP["<b>Vendor phone</b>, the terminal<br/>NfcTap reader mode on /vendor/sale<br/><br/>GET /vendors, POST /sales<br/>POST /sales/:id/charge, GET /sales/:id"]
+        VP -- "NFC, no network<br/>SELECT AID F0494150415901" --> BP
+        BP -- "wallet address + 9000" --> VP
+    end
+
+    SVC["<b>tap-to-pay-svc</b> · http://#lt;laptop-LAN-IP#gt;:4000<br/>routes (zod) → services (rules + charge orchestration) → views { data, error }<br/>Repo (Prisma) and OpenPayments (SDK) behind interfaces, so tests inject fakes<br/>holds the buyer's grant token and signs every wallet call with private.key<br/>never holds money"]
+    PG[("<b>Postgres</b> · localhost:55000<br/>Buyer, Vendor, Sale")]
+
+    subgraph wallets ["Interledger Test Wallet (Rafiki)"]
+        direction LR
+        BW["<b>Buyer's wallet</b><br/>grant, quote, outgoing payment"]
+        VW["<b>Vendor's wallet</b><br/>incoming payment"]
+        BW == "Interledger settles" ==> VW
+    end
+
+    phones -- "HTTP JSON over Wi-Fi" --> SVC
+    SVC -- SQL --> PG
+    SVC -- "Open Payments over HTTPS<br/>HTTP message signatures<br/>+ GNAP tokens" --> wallets
+
+    classDef buyer fill:#0E9F8F,stroke:#0E9F8F,color:#fff
+    classDef vendor fill:#E07A1F,stroke:#E07A1F,color:#fff
+    classDef service fill:#6B2FB3,stroke:#6B2FB3,color:#fff
+    classDef db fill:#6B7280,stroke:#6B7280,color:#fff
+    classDef buyerWallet fill:#3B4FD8,stroke:#3B4FD8,color:#fff
+    classDef vendorWallet fill:#C0392B,stroke:#C0392B,color:#fff
+    class BP buyer
+    class VP vendor
+    class SVC service
+    class PG db
+    class BW buyerWallet
+    class VW vendorWallet
+    style wallets stroke:#B8860B,stroke-width:2px
+    linkStyle 2 stroke:#B8860B,stroke-width:3px
 ```
 
-Two monorepo cautions: Expo resolves workspace packages on its own since SDK 52, but `packages/contracts` must be plain TypeScript with no build step so Metro can read it, and `apps/api/tsconfig.json` must reach it through the workspace symlink or a `paths` entry. Prisma's generated client stays inside `apps/api/src/generated` and git-ignored.
+Working in two independent folders: run every npm command inside `tap-to-pay-svc` or `tap-to-pay-app`, never at the root. A change to a view in section 9 lands in both places in the same commit: `tap-to-pay-svc/src/services/views.ts`, where the service builds it, and `tap-to-pay-app/src/api/types.ts`, where the app reads it. Prisma's generated client stays inside `tap-to-pay-svc/src/generated` and git-ignored.
 
 ## 5. Tech stack
 
@@ -131,7 +144,7 @@ Versions are the ones that worked together in the practice repos on Node 20.20.2
 | Layer | Choice | Version | Why this one |
 | --- | --- | --- | --- |
 | Language | TypeScript, strict, ES modules | 5.9.3 service, 6.0.x app | one language across the monorepo |
-| Monorepo tooling | npm workspaces | npm 10.8.2 | already installed; no extra tool to learn in a day |
+| Repository layout | two independent npm projects, no workspaces | npm 10.8.2 | each folder installs and deploys on its own; Metro and `tsc` need no workspace setup |
 | Service runtime | Node.js | 24.22.0 | LTS on the laptop |
 | HTTP | Express | 5.3.0 | async handlers forward rejections to the error handler, so routes need no try/catch |
 | Validation | zod | 4.6.7 | one schema per route body and one for the environment |
@@ -186,7 +199,7 @@ If the charge request itself fails, the app reads the sale once before calling i
 - Every step logs under the logcat tag `NfcTap`: reader on and off, tag discovered with its tech list, the APDU sent and the raw response, the card answering or refusing, deactivation reason. The JS side logs `[nfc] …` lines (`ReactNativeJS`). Section 14 has the one-terminal-per-phone command.
 - Manifest also declares `uses-permission android.permission.NFC` and `uses-feature android.hardware.nfc` and `.hce` as not required.
 
-**API client**: one `fetch` wrapper that unwraps `{ data, error }`, throws `ApiError(code, message, status)` and turns a network failure into *Can't reach the service at <url>*. The base URL is `EXPO_PUBLIC_API_URL`, inlined at bundle time. Types come from `packages/contracts`.
+**API client**: one `fetch` wrapper that unwraps `{ data, error }`, throws `ApiError(code, message, status)` and turns a network failure into *Can't reach the service at <url>*. The base URL is `EXPO_PUBLIC_API_URL`, inlined at bundle time. Types are the views of section 9, mirrored by hand in `src/api/types.ts`.
 
 **Components**: `Screen` (themed view, safe area, scroll), `ThemedText`, `ThemedView`, `BigButton` (label, colour, `ghost`, `disabled`), `StatusPill` (`wait` / `ok` / `bad` / `neutral`). Theme colours follow the system light/dark scheme. `app.json`: package `co.inteligenciaartesanal.taptopay`, `userInterfaceStyle: automatic`, plugins `expo-router` and `expo-splash-screen`, experiments `typedRoutes` and `reactCompiler`.
 
@@ -322,7 +335,7 @@ Nine JSON endpoints on port 4000, one envelope, no authentication. Every respons
 | `POST /sales/:id/charge` | `/vendor/sale`, after the tap | `{ walletAddress }`, a URL | 200 | `SaleView` as `PAID`, `CHARGING` or `FAILED`; blocks up to `CHARGE_POLL_SECONDS` plus wallet latency |
 | `GET /sales/:id` | `/vendor/sale`, every 1 s while `CHARGING`, at most 30 | | 200 | `SaleView`; a `CHARGING` sale is re-checked against the wallet first |
 
-**Views** (`packages/contracts`)
+**Views** (built in the service's `src/services/views.ts`, mirrored in the app's `src/api/types.ts`)
 
 - `SaleView`: `id`, `vendorId`, `vendorName?` (only from `POST /sales` and the buyer's history), `buyerId | null`, `amount`, `amountFormatted`, `assetCode`, `assetScale`, `status`, `failureCode | null`, `failureMessage | null`, `createdAt`, `paidAt | null`. Wallet URLs are never returned.
 - `BuyerView`: `id`, `name`, `walletAddress`, `assetCode`, `assetScale`, `perPaymentLimit`, `dailyLimit`, `spentToday`, `remainingToday`, `hasGrant`. The token is never returned.
@@ -435,7 +448,7 @@ The service and its database are fully trusted; the phones, the network and the 
 
 | Secret | Where | Never |
 | --- | --- | --- |
-| `private.key`, the service's developer private key | `apps/api/`, git-ignored; a secret on the host | in git, in the app |
+| `private.key`, the service's developer private key | `tap-to-pay-svc/`, git-ignored; a secret on the host | in git, in the app |
 | `OP_KEY_ID`, `DATABASE_URL` with the Postgres password | `.env`, git-ignored; `.env.example` carries placeholders | in git |
 | the buyer's `grantAccessToken` and `grantManageUrl` | `Buyer` row; whoever has it can spend from that wallet | returned by the API, logged, on a phone |
 | non-interactive `incoming-payment` and `quote` tokens | requested per charge, used once | stored |
@@ -466,11 +479,12 @@ KYC and sanctions screening belong to the wallet provider, which holds the money
 
 Each app reads one `.env`, git-ignored, copied from a committed `.env.example`. Every service entry point imports `dotenv/config`; nothing ever sources `.env` in a shell, because unquoted values with spaces break there and not in dotenv.
 
-**`apps/api/.env`**
+**`tap-to-pay-svc/.env`**
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `DATABASE_URL` | none | `postgresql://postgres:<password>@localhost:55000/tap_to_pay` |
+| `POSTGRES_PASSWORD` | none | the `<password>` above; read only by `docker-compose.yml` for the local Postgres |
 | `PORT` | `4000` | listens on `0.0.0.0` so phones can reach it |
 | `OP_CLIENT_WALLET_ADDRESS` | none | the service's own wallet address, or the vendor's in the two-address layout |
 | `OP_KEY_ID` | none | the developer key id shown by the Test Wallet |
@@ -483,15 +497,15 @@ Each app reads one `.env`, git-ignored, copied from a committed `.env.example`. 
 
 `loadConfig` validates all of it with one zod schema and names the missing variable in its error.
 
-**`apps/mobile/.env`**: `EXPO_PUBLIC_API_URL=http://<laptop-LAN-IP>:4000`. The laptop address is `ipconfig getifaddr en0`; the value is inlined when Metro bundles, so after changing it restart Metro with `npx expo start --clear`. Without it the app calls `localhost`, which on a phone is the phone. Check from the phone's browser: `http://<LAN-IP>:4000/health` must show JSON.
+**`tap-to-pay-app/.env`**: `EXPO_PUBLIC_API_URL=http://<laptop-LAN-IP>:4000`. The laptop address is `ipconfig getifaddr en0`; the value is inlined when Metro bundles, so after changing it restart Metro with `npx expo start --clear`. Without it the app calls `localhost`, which on a phone is the phone. Check from the phone's browser: `http://<LAN-IP>:4000/health` must show JSON.
 
-**Postgres**: `docker compose up -d`, image `postgres`, port `55000`, user `postgres`, database `tap_to_pay`. Prisma 7 reads the URL from `prisma.config.ts`, which imports `dotenv/config`; the schema's `datasource` block has no `url`. The client is generated into `apps/api/src/generated/prisma`, git-ignored, by `npm run db:generate`; neither `npm install` nor `migrate dev` does it.
+**Postgres**: `docker compose up -d` in `tap-to-pay-svc`, image `postgres:18`, port `55000`, user `postgres`, password `POSTGRES_PASSWORD`, database `tap_to_pay`; a named volume keeps the data, and the buyer's grant, across restarts. Prisma 7 reads the URL from `prisma.config.ts`, which imports `dotenv/config`; the schema's `datasource` block has no `url`. The client is generated into `tap-to-pay-svc/src/generated/prisma`, git-ignored, by `npm run db:generate`; neither `npm install` nor `migrate dev` does it.
 
 **Android build machine**: `JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home`, `ANDROID_HOME=$HOME/Library/Android/sdk`, both exported in `~/.zshrc` with `$JAVA_HOME/bin` first on `PATH`.
 
-**Scripts**. `apps/api`: `dev` (`tsx watch src/server.ts`), `start`, `typecheck` (`tsc --noEmit`), `test` (`vitest run`), `db:migrate` (`prisma migrate dev`), `db:generate` (`prisma generate`), `seed`, `grant:buyer -- --buyer <id|name|walletAddress>` (the `--` is required or npm swallows the flag). `apps/mobile`: `start` (Metro), `android` (`expo run:android`), `lint` (`expo lint`).
+**Scripts**. `tap-to-pay-svc`: `dev` (`tsx watch src/server.ts`), `start` (`tsx src/server.ts`), `typecheck` (`tsc --noEmit`), `test` (`vitest run`), `db:migrate` (`prisma migrate dev`), `db:generate` (`prisma generate`), `seed`, `grant:buyer -- --buyer <id|name|walletAddress>` (the `--` is required or npm swallows the flag). `tap-to-pay-app`: `start` (Metro), `android` (`expo run:android`), `lint` (`expo lint`).
 
-**Deploying for the demo**: service and Postgres on a public HTTPS host, the private key injected as a secret and written to the path in `OP_PRIVATE_KEY_PATH`, the app's `EXPO_PUBLIC_API_URL` pointed at the HTTPS URL and rebuilt. The grant's finish redirect must reach the machine running the grant script, so either run the script on a laptop with `DATABASE_URL` pointing at the deployed database, or add a `/finish` route to the deployed service.
+**Deploying for the demo**: service and Postgres on a public HTTPS host with `tap-to-pay-svc` as the service's root directory, the private key injected as a secret and written to the path in `OP_PRIVATE_KEY_PATH`, the app's `EXPO_PUBLIC_API_URL` pointed at the HTTPS URL and rebuilt. The grant's finish redirect must reach the machine running the grant script, so either run the script on a laptop with `DATABASE_URL` pointing at the deployed database, or add a `/finish` route to the deployed service.
 
 ## 13. Testing strategy
 
@@ -526,7 +540,7 @@ Preflight: service up and `curl localhost:4000/buyers` shows the buyer with `has
 
 ## 14. Developer workflow
 
-**Daily loop**: `docker compose up -d`; in `apps/api` `npm run dev`; in `apps/mobile` `npx expo start`; phones connected over adb with `adb reverse tcp:8081 tcp:8081` each; `npm test` in `apps/api` on every change; `npx tsc --noEmit` and `npx expo lint` in `apps/mobile`.
+**Daily loop**: in `tap-to-pay-svc` `docker compose up -d` and `npm run dev`; in `tap-to-pay-app` `npx expo start`; phones connected over adb with `adb reverse tcp:8081 tcp:8081` each; `npm test` in `tap-to-pay-svc` on every change; `npx tsc --noEmit` and `npx expo lint` in `tap-to-pay-app`.
 
 **Phones**. Two Android phones with NFC, Developer options and USB or wireless debugging on. Before borrowing one, check it: `adb -s <serial> shell pm list features | grep nfc` must list `android.hardware.nfc.hce` on the buyer phone and `android.hardware.nfc` on the vendor phone. Check the radio is on: `adb -s <serial> shell dumpsys nfc | grep mState` must say `mState=on` on both. That silence on tap in the practice run was the card phone with NFC off.
 
@@ -571,7 +585,7 @@ A healthy tap, vendor first: `reader: start requested … enabled=true`, `reader
 | `--buyer ana` vs `Ana` | *Buyer "ana" not found* | exact name, or pass the wallet address |
 | daily-cap tests and the real clock | pass one day, fail the next | inject the clock into the fake repo too |
 
-**Useful SQL**: `SELECT id, status, amount, "failureCode", "createdAt" FROM "Sale" ORDER BY "createdAt" DESC LIMIT 10;` · `SELECT name, "grantAccessToken" IS NOT NULL AS has_grant FROM "Buyer";` · `docker exec postgres psql -U postgres -d tap_to_pay -c '…'`.
+**Useful SQL**: `SELECT id, status, amount, "failureCode", "createdAt" FROM "Sale" ORDER BY "createdAt" DESC LIMIT 10;` · `SELECT name, "grantAccessToken" IS NOT NULL AS has_grant FROM "Buyer";` · `docker compose exec postgres psql -U postgres -d tap_to_pay -c '…'` in `tap-to-pay-svc`.
 
 ## 15. Decisions and known limitations
 
@@ -598,7 +612,7 @@ Each entry: what was decided, why, what it costs. Keep or change them on purpose
 19. **NFC through a native Kotlin module**, category `other`, no unlock required, development build only.
 20. **JDK 17 for the Android build**; `--device` takes a name; typed routes regenerate on `expo start`.
 21. **The service has its own wallet address and may borrow the vendor's.** The signer must be a wallet address because that is where the JWKS lives.
-22. **Monorepo with a shared contracts package** (new in this design). Removes the hand-mirrored API types. Cost: Metro and `tsc` must both resolve the workspace package; keep it plain TypeScript.
+22. **Two independent applications in one repository, no workspaces.** Each folder installs, runs, tests and deploys on its own, and Metro and `tsc` need no workspace setup. Cost: the section 9 views are mirrored by hand in both applications; change both in the same commit.
 23. **NFC logging on both sides by default** (added on 16 October after a silent tap). Logcat tag `NfcTap`, JS `[nfc]` lines, a per-phone log script.
 
 **Other accepted shortcuts**: non-interactive grants requested per charge, never cached · non-wallet errors inside the wallet block reported as `WALLET_ERROR` · a rotated token is lost if storing it fails · `PAID` writes unconditional (`paidAt` may be written twice in a race) · `DAILY_LIMIT_TZ` not validated at startup · the vendors route reads the repository directly.
@@ -607,14 +621,14 @@ Each entry: what was decided, why, what it costs. Keep or change them on purpose
 
 ## 16. Build order for the event
 
-Hours are effort. With two people, the app blocks (3, 4) run in parallel with the service blocks (1, 2) against the contract in section 9 and the shared types in `packages/contracts`. Each block ends with a commit and a prompt-log entry (section 17).
+Hours are effort. With two people, the app blocks (3, 4) run in parallel with the service blocks (1, 2) against the contract in section 9, each side writing its own copy of the view types. Each block ends with a commit and a prompt-log entry (section 17).
 
 | Order | Block | Hours | Ends at | Contents | Done when |
 | --- | --- | --- | --- | --- | --- |
-| 0 | Kick-off | 0.5 | 0:30 | Test Wallet addresses and key (three, or two with the key on the vendor); `docker-compose.yml`; the monorepo skeleton with npm workspaces, `packages/contracts` types, `.env.example` files, `AI_USAGE.md` and `docs/prompts/` started | `curl` of each wallet address URL returns its document; `npm install` at the root succeeds |
+| 0 | Kick-off | 0.5 | 0:30 | Test Wallet addresses and key (three, or two with the key on the vendor); `tap-to-pay-svc` and `tap-to-pay-app` scaffolded side by side, each with pinned versions, `.gitignore` and `.env.example`; `docker-compose.yml` in the service; `AI_USAGE.md` and `prompts/` started | `curl` of each wallet address URL returns its document; in each folder `npm install` succeeds, the service's smoke test passes and the app type-checks and lints |
 | 1 | **Service rules and orchestration** | **3** | 3:30 | amounts and limits with tests (0.5) → schema, migration, `Repo` with `transitionSale` and `sumSpent` (0.5) → `chargeSale` against fakes and its tests: every failure code, no wallet call on rule failures, 401/403 rotation, polling never fails a sale, double charge (1.25) → routes, envelope, error handler (0.5) → seed (0.25) | tests green; `POST /sales` and `POST /sales/:id/charge` work with fakes through supertest |
 | 2 | **Grant handling** | **1** | 4:30 | the real Open Payments client; the interactive grant script with the local finish listener, nonce, tolerant hash, `continue`, token stored; first real charge from `curl` | a `curl` charge moves Test Wallet money |
-| 3 | **App: vendor flow** | **1.5** | 6:00 | Expo app skeleton; the native module with the reader side first (reader mode, `IsoDep`, `SELECT` AID, logging); API client; role picker with health line; vendor list; sale screen state machine with polling ≤ 30 s | the vendor phone reads a hard-coded payload from a second phone and charges |
+| 3 | **App: vendor flow** | **1.5** | 6:00 | the native module with the reader side first (reader mode, `IsoDep`, `SELECT` AID, logging); API client and its view types; role picker with health line; vendor list; sale screen state machine with polling ≤ 30 s | the vendor phone reads a hard-coded payload from a second phone and charges |
 | 4 | **App: buyer flow** | **1** | 7:00 | `HostApduService` answering the stored payload; buyer list with grant status; card screen with limits, activate/deactivate, remaining today, history polled every 3 s | the two-phone happy path end to end |
 | 5 | **Deploy** | **0.5** | 7:30 | service and Postgres on a public HTTPS host, key from a secret, app `.env` to the HTTPS URL, rebuild | phones work off the laptop's Wi-Fi |
 | 6 | Rehearsal, fixes, demo | 1.5 | 9:00 | outcome matrix rows, demo script, two clean runs | two clean runs in a row |
@@ -623,7 +637,7 @@ Write the orchestration against the `Repo` and `OpenPayments` interfaces from th
 
 ## 17. AI usage declaration
 
-The submission repository carries `AI_USAGE.md` at its root and a prompt log in `docs/prompts/`. Both are written during the event, alongside the code, not reconstructed afterwards. Check the organisers' template before the event and fit this outline to it.
+The submission repository carries `AI_USAGE.md` and a prompt log in `prompts/` at its root. Both are written during the event, alongside the code, not reconstructed afterwards. Check the organisers' template before the event and fit this outline to it.
 
 **`AI_USAGE.md` outline**
 
@@ -635,20 +649,20 @@ The submission repository carries `AI_USAGE.md` at its root and a prompt log in 
 - <any other tool: Copilot, ChatGPT, image generation, none>.
 
 ## What the AI did
-- Generated code from the prompts in docs/prompts/, in the order listed there, from the design in docs/SDD.md.
+- Generated code from the prompts in prompts/, in the order listed there, from the design in SDD.md.
 - Wrote unit tests, documentation and commit messages; every commit carries
   `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
 - Debugged build and device problems from logs we pasted.
 
 ## What the humans did
-- Wrote docs/SDD.md before the event, from a practice proof of concept built on 14 and 15 October 2026.
+- Wrote SDD.md before the event, from a practice proof of concept built on 14 and 15 October 2026.
   No code from that practice work is in this repository; the design and the lessons are.
 - Decided every architecture and product choice recorded in SDD.md section 15.
 - Reviewed every diff before committing, ran the tests, and ran every manual two-phone test.
 - Created the Test Wallet accounts, keys and grants by hand.
 
 ## Inputs given to the AI
-- docs/SDD.md, the Open Payments documentation and SDK, the Expo and Android documentation,
+- SDD.md, the Open Payments documentation and SDK, the Expo and Android documentation,
   logcat output, error messages, screenshots of the phones.
 
 ## Verification
@@ -656,11 +670,11 @@ The submission repository carries `AI_USAGE.md` at its root and a prompt log in 
 - App: tsc, expo lint, and the manual script in SDD.md section 13 on two phones.
 
 ## Prompt log
-- docs/prompts/NN-<slug>.md, one file per prompt, in the order sent. Each has the prompt as typed,
+- prompts/NN-<slug>.md, one file per prompt, in the order sent. Each has the prompt as typed,
   the time, the model, the files it touched, and what we kept, changed or discarded.
 ```
 
-**Prompt-log convention** (`docs/prompts/NN-<slug>.md`)
+**Prompt-log convention** (`prompts/NN-<slug>.md`)
 
 ```markdown
 # 03 Charge orchestration against fakes
@@ -674,55 +688,55 @@ Rules we hold ourselves to: the prompt is pasted as sent, including typos; hand 
 
 ## 18. Prompt pack
 
-The prompts below reproduce the build in the order of section 16. Each one is sent with this SDD in the repository at `docs/SDD.md` and names the sections it relies on. Paste them verbatim into the prompt log. Adjust names, addresses and the shared package path to what the kick-off produced.
+The prompts below reproduce the build in the order of section 16. Each one is sent with this SDD at the repository root as `SDD.md` and names the sections it relies on. Paste them verbatim into the prompt log. Adjust names and addresses to what the kick-off produced.
 
-**P0 · Monorepo skeleton** (block 0)
+**P0 · Scaffold both applications** (block 0)
 
-> Read docs/SDD.md sections 4, 5 and 12. Create the monorepo described there with npm workspaces: `apps/api`, `apps/mobile` (leave it empty for now), `packages/contracts`. In `packages/contracts` write the TypeScript types from section 9 (SaleStatus, SaleView, BuyerView, VendorView, BuyerSales, Health, and a union of the sale failure codes) as plain `.ts` with no build step. Add `docker-compose.yml` for PostgreSQL on port 55000 with user postgres and a password read from `.env`, root `.gitignore` covering `.env`, `private.key` and `src/generated`, and `apps/api/.env.example` with every variable from section 12 and placeholder values. Pin the versions from section 5. Do not write application code yet.
+> Read SDD.md sections 4, 5 and 12. Scaffold the two independent folders described there, with no root `package.json` and no npm workspaces. In `tap-to-pay-svc`: TypeScript strict with ES modules, every service package from section 5 at its pinned version, the `dev`, `start`, `typecheck` and `test` scripts, `src/app.ts` with a `createApp()` that only answers `GET /health`, `src/server.ts` listening on `0.0.0.0:PORT` that exits 1 when the port is taken, one supertest smoke test, `docker-compose.yml` for PostgreSQL 18 on port 55000 with user postgres, a password read from `.env` and a named volume, a `.gitignore` covering `.env`, `private.key` and `src/generated`, and `.env.example` with every variable from section 12 and placeholder values. In `tap-to-pay-app`: an Expo SDK 57 app from the default template with its example screens removed, Android package `co.inteligenciaartesanal.taptopay`, the `start`, `android` and `lint` scripts from section 12, `.env` git-ignored and `.env.example` with `EXPO_PUBLIC_API_URL`. Do not write application code yet.
 
 **P1 · Amounts and limits with tests** (block 1)
 
-> Read docs/SDD.md sections 7, 8 and 13. In `apps/api` set up TypeScript strict, ES modules, Vitest 4.1.11 and tsx. Write `src/services/money.ts` (`parseAmount` accepting only `^\d+$` and > 0 into bigint, `formatAmount` by asset scale, `toAmount`, `amountToBigInt`) and `src/services/limits.ts` (`canCharge`, `remainingToday`, `dayRange` as described in section 8 "Today", correct on daylight-saving days). Write `tests/money.test.ts` and `tests/limits.test.ts` covering every case listed in the section 13 table, with the exact refusal messages from section 9. Run the tests until green.
+> Read SDD.md sections 7, 8 and 13. In `tap-to-pay-svc` write `src/services/money.ts` (`parseAmount` accepting only `^\d+$` and > 0 into bigint, `formatAmount` by asset scale, `toAmount`, `amountToBigInt`) and `src/services/limits.ts` (`canCharge`, `remainingToday`, `dayRange` as described in section 8 "Today", correct on daylight-saving days). Write `tests/money.test.ts` and `tests/limits.test.ts` covering every case listed in the section 13 table, with the exact refusal messages from section 9. Run the tests until green.
 
 **P2 · Schema, Prisma 7 and the repository** (block 1)
 
-> Read docs/SDD.md sections 7, 8 and 12. Add Prisma 7.10 with the `prisma-client` generator writing to `src/generated/prisma`, `@prisma/adapter-pg`, and `prisma.config.ts` reading `DATABASE_URL` through `dotenv/config`. Write `prisma/schema.prisma` with the three models and the enum from section 8, including the `(buyerId, status, createdAt)` index, and the initial migration. Write `src/db/prisma.ts` and `src/db/repos.ts` with the `Repo` interface from section 7 and `PrismaRepo`, where `transitionSale` is a conditional `updateMany` returning the row or null, and `sumSpent` is the aggregate from section 8. Add the `db:migrate` and `db:generate` scripts.
+> Read SDD.md sections 7, 8 and 12. Add Prisma 7.10 with the `prisma-client` generator writing to `src/generated/prisma`, `@prisma/adapter-pg`, and `prisma.config.ts` reading `DATABASE_URL` through `dotenv/config`. Write `prisma/schema.prisma` with the three models and the enum from section 8, including the `(buyerId, status, createdAt)` index, and the initial migration. Write `src/db/prisma.ts` and `src/db/repos.ts` with the `Repo` interface from section 7 and `PrismaRepo`, where `transitionSale` is a conditional `updateMany` returning the row or null, and `sumSpent` is the aggregate from section 8. Add the `db:migrate` and `db:generate` scripts.
 
 **P3 · Charge orchestration against fakes** (block 1)
 
-> Read docs/SDD.md sections 7, 9, 10 and 13. Write `src/open-payments/types.ts` (the `OpenPayments` interface, `WalletInfo`, `WalletError`, `isUnauthorized`, `toWalletError`), `src/services/errors.ts`, `src/services/views.ts`, `src/services/buyers.ts` and `src/services/sales.ts` with `Deps`, `createSale`, `chargeSale` and `refreshSale` following the ten steps and the failure table of section 10 exactly: rules in order with no wallet call on refusal, the conditional claim, incoming payment, quote, outgoing payment with rotation on 401 or 403 and one retry, a 4xx fails the sale and a timeout or 5xx leaves it CHARGING, polling by receivedAmount for pollSeconds, a polling error never fails a sale. Write `tests/fakes.ts` (`FakeRepo` taking a clock, `FakeOpenPayments` recording calls as strings and scriptable) and `tests/sales.test.ts`, `tests/buyers.test.ts`, `tests/views.test.ts` covering every line of the section 13 table, with the clock pinned to 2026-10-14T15:00:00Z. Green before you stop.
+> Read SDD.md sections 7, 9, 10 and 13. Write `src/open-payments/types.ts` (the `OpenPayments` interface, `WalletInfo`, `WalletError`, `isUnauthorized`, `toWalletError`), `src/services/errors.ts`, `src/services/views.ts`, `src/services/buyers.ts` and `src/services/sales.ts` with `Deps`, `createSale`, `chargeSale` and `refreshSale` following the ten steps and the failure table of section 10 exactly: rules in order with no wallet call on refusal, the conditional claim, incoming payment, quote, outgoing payment with rotation on 401 or 403 and one retry, a 4xx fails the sale and a timeout or 5xx leaves it CHARGING, polling by receivedAmount for pollSeconds, a polling error never fails a sale. Write `tests/fakes.ts` (`FakeRepo` taking a clock, `FakeOpenPayments` recording calls as strings and scriptable) and `tests/sales.test.ts`, `tests/buyers.test.ts`, `tests/views.test.ts` covering every line of the section 13 table, with the clock pinned to 2026-10-14T15:00:00Z. Green before you stop.
 
 **P4 · Routes, envelope, error handler, seed** (block 1)
 
-> Read docs/SDD.md sections 7, 9 and 12. Write `src/config.ts` with one zod schema and defaults, `src/app.ts` with `createApp(deps, meta)`, the four routers under `src/routes/` validating bodies with zod and returning the `{ data, error }` envelope, the 404 catch-all and the error mapping from section 7, and `src/server.ts` that exits 1 when the port is taken. Write `scripts/seed.ts` that resolves both wallet addresses through the `OpenPayments` interface and upserts the buyer and vendor, keeping limits and grant on re-run. Write `tests/config.test.ts` and `tests/app.test.ts` with supertest against the fakes, covering the section 13 rows. Add the `dev`, `start`, `typecheck`, `seed` scripts.
+> Read SDD.md sections 7, 9 and 12. Write `src/config.ts` with one zod schema and defaults, `src/app.ts` with `createApp(deps, meta)`, the four routers under `src/routes/` validating bodies with zod and returning the `{ data, error }` envelope, the 404 catch-all and the error mapping from section 7, and `src/server.ts` that exits 1 when the port is taken. Write `scripts/seed.ts` that resolves both wallet addresses through the `OpenPayments` interface and upserts the buyer and vendor, keeping limits and grant on re-run. Write `tests/config.test.ts` and `tests/app.test.ts` with supertest against the fakes, covering the section 13 rows. Add the `dev`, `start`, `typecheck`, `seed` scripts.
 
 **P5 · The real Open Payments client and the grant script** (block 2)
 
-> Read docs/SDD.md sections 3, 7, 10 and 12. Write `src/open-payments/client.ts` implementing `OpenPayments` with `@interledger/open-payments` 7.4.0: `createAuthenticatedClient` with a 15 s timeout, non-interactive incoming-payment and quote grants per charge, `incomingPayment.getPublic` for completion, `token.rotate`, and SDK errors mapped to `WalletError` with the wallet's description. Write `src/open-payments/hash.ts` with `verifyInteractionHash` accepting base64 and base64url, padded or not, and the auth server with and without a trailing slash, plus `tests/hash.test.ts` and `tests/open-payments-client.test.ts`. Write `scripts/grant-buyer.ts` as described in section 10 step 3, matching `--buyer` by id, exact name or wallet address, listening once on `http://localhost:4100/finish`, reporting `grant_rejected`, and on a hash mismatch printing the received hash and both expected digests but never the token. Wire the real client in `src/server.ts`.
+> Read SDD.md sections 3, 7, 10 and 12. Write `src/open-payments/client.ts` implementing `OpenPayments` with `@interledger/open-payments` 7.4.0: `createAuthenticatedClient` with a 15 s timeout, non-interactive incoming-payment and quote grants per charge, `incomingPayment.getPublic` for completion, `token.rotate`, and SDK errors mapped to `WalletError` with the wallet's description. Write `src/open-payments/hash.ts` with `verifyInteractionHash` accepting base64 and base64url, padded or not, and the auth server with and without a trailing slash, plus `tests/hash.test.ts` and `tests/open-payments-client.test.ts`. Write `scripts/grant-buyer.ts` as described in section 10 step 3, matching `--buyer` by id, exact name or wallet address, listening once on `http://localhost:4100/finish`, reporting `grant_rejected`, and on a hash mismatch printing the received hash and both expected digests but never the token. Wire the real client in `src/server.ts`.
 
-**P6 · Expo app skeleton and the NFC reader** (block 3)
+**P6 · App view types and the NFC reader** (block 3)
 
-> Read docs/SDD.md sections 4, 5, 6 and 14. In `apps/mobile` create an Expo SDK 57 app with Expo Router, typed routes, TypeScript strict, Android package `co.inteligenciaartesanal.taptopay`, consuming `packages/contracts`. Create the local Expo Module `modules/nfc-tap` in Kotlin exactly as section 6 describes: `Apdu.kt` with AID F0494150415901 and the SELECT command, `NfcTapModule.kt` with isSupported, isEnabled, isHceSupported, setCardPayload, getCardPayload, startReader (reader mode NFC-A, NFC-B, skip NDEF; IsoDep; 5 s timeout; one transceive), stopReader, events onCard and onError, and logcat logging under the tag NfcTap at every step. Add the manifest with the NFC permission and the HostApduService declaration from section 6, leaving `HceCardService.kt` as a stub that answers 6A82. Write `src/api/client.ts` unwrapping the envelope into `ApiError`, and `scripts/nfc-logs.sh` from section 14. Do not build yet.
+> Read SDD.md sections 4, 5, 6, 9 and 14. In `tap-to-pay-app`, scaffolded by P0, write `src/api/types.ts` with the views from section 9. Create the local Expo Module `modules/nfc-tap` in Kotlin exactly as section 6 describes: `Apdu.kt` with AID F0494150415901 and the SELECT command, `NfcTapModule.kt` with isSupported, isEnabled, isHceSupported, setCardPayload, getCardPayload, startReader (reader mode NFC-A, NFC-B, skip NDEF; IsoDep; 5 s timeout; one transceive), stopReader, events onCard and onError, and logcat logging under the tag NfcTap at every step. Add the manifest with the NFC permission and the HostApduService declaration from section 6, leaving `HceCardService.kt` as a stub that answers 6A82. Write `src/api/client.ts` unwrapping the envelope into `ApiError`, and `scripts/nfc-logs.sh` from section 14. Do not build yet.
 
 **P7 · Vendor flow** (block 3)
 
-> Read docs/SDD.md section 6. Write the role picker `/` with the two big buttons, the API URL line and the health pill; `/vendor` listing vendors; `/vendor/sale` driven by a `useSale` hook implementing the state table in section 6 exactly, including the ref-updating `go()` function, the reader started after `POST /sales`, `stopReader` on `onCard`, the charge call, polling `GET /sales/:id` every second up to 30 times, the re-read of the sale when the charge request itself fails, and `[nfc] …` console lines on every transition and event. Components: `Screen`, `ThemedText`, `ThemedView`, `BigButton`, `StatusPill`, with the colours from section 3. Then tell me the exact commands from section 14 to build and install on the vendor phone.
+> Read SDD.md section 6. Write the role picker `/` with the two big buttons, the API URL line and the health pill; `/vendor` listing vendors; `/vendor/sale` driven by a `useSale` hook implementing the state table in section 6 exactly, including the ref-updating `go()` function, the reader started after `POST /sales`, `stopReader` on `onCard`, the charge call, polling `GET /sales/:id` every second up to 30 times, the re-read of the sale when the charge request itself fails, and `[nfc] …` console lines on every transition and event. Components: `Screen`, `ThemedText`, `ThemedView`, `BigButton`, `StatusPill`, with the colours from section 3. Then tell me the exact commands from section 14 to build and install on the vendor phone.
 
 **P8 · Buyer flow and the HCE card** (block 4)
 
-> Read docs/SDD.md section 6. Complete `HceCardService.kt`: on our SELECT answer the payload stored in SharedPreferences plus 9000, 6985 when no payload is stored, 6A82 otherwise, log every APDU and the deactivation reason under the tag NfcTap. Write `/buyer` listing buyers with the grant pill, and `/buyer/card` with the limits form calling `PATCH /buyers/:id/limits`, the card switch calling `setCardPayload` (disabled without a grant or without HCE), the *Left today* line and the history polled every 3 s while focused through a `useBuyerSales` hook. Log the card activation with the NFC and HCE flags. Then give me the rebuild commands for both phones.
+> Read SDD.md section 6. Complete `HceCardService.kt`: on our SELECT answer the payload stored in SharedPreferences plus 9000, 6985 when no payload is stored, 6A82 otherwise, log every APDU and the deactivation reason under the tag NfcTap. Write `/buyer` listing buyers with the grant pill, and `/buyer/card` with the limits form calling `PATCH /buyers/:id/limits`, the card switch calling `setCardPayload` (disabled without a grant or without HCE), the *Left today* line and the history polled every 3 s while focused through a `useBuyerSales` hook. Log the card activation with the NFC and HCE flags. Then give me the rebuild commands for both phones.
 
 **P9 · Deploy** (block 5)
 
-> Read docs/SDD.md section 12 "Deploying for the demo". Prepare `apps/api` for Railway: a start command, the private key written from a `PRIVATE_KEY_PEM` secret to `OP_PRIVATE_KEY_PATH` at boot if the file is missing, `PORT` from the platform, Postgres from the platform's `DATABASE_URL`, and a note in README on running the grant script against the deployed database. Keep the local setup working unchanged.
+> Read SDD.md section 12 "Deploying for the demo". Prepare `tap-to-pay-svc` for Railway as the service's root directory: a start command, the private key written from a `PRIVATE_KEY_PEM` secret to `OP_PRIVATE_KEY_PATH` at boot if the file is missing, `PORT` from the platform, Postgres from the platform's `DATABASE_URL`, and a note in README on running the grant script against the deployed database. Keep the local setup working unchanged.
 
 **P10 · Rehearsal fixes** (block 6, repeated)
 
-> Here is what happened on the phones and the logs from `scripts/nfc-logs.sh` for both: <paste>. Read docs/SDD.md sections 10 and 14, find the root cause before proposing a fix, and make the smallest change that fixes it, with a test when the service is involved.
+> Here is what happened on the phones and the logs from `scripts/nfc-logs.sh` for both: <paste>. Read SDD.md sections 10 and 14, find the root cause before proposing a fix, and make the smallest change that fixes it, with a test when the service is involved.
 
 **P11 · Documentation and AI usage** (continuous)
 
-> Read docs/SDD.md section 17. Update `AI_USAGE.md` and add `docs/prompts/NN-<slug>.md` for the prompt I just sent, with the prompt verbatim, the time, the files touched and what I kept or changed. Write the commit message in the infinitive, at most 72 characters, with the `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>` trailer.
+> Read SDD.md section 17. Update `AI_USAGE.md` and add `prompts/NN-<slug>.md` for the prompt I just sent, with the prompt verbatim, the time, the files touched and what I kept or changed. Write the commit message in the infinitive, at most 72 characters, with the `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>` trailer.
 
 ---
 
