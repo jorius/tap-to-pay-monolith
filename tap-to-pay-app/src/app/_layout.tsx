@@ -1,5 +1,55 @@
-import { Stack } from "expo-router";
+import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { useColorScheme } from 'react-native';
+
+import { ConnectionDot } from '@/components/connection-label';
+import { HeaderTitle } from '@/components/header-title';
+import { HealthProvider } from '@/hooks/use-health';
+import { SessionProvider, useSession } from '@/hooks/use-session';
+import { useTheme } from '@/hooks/use-theme';
+import { useCopy } from '@/i18n';
+import { commonCopy } from '@/i18n/common';
 
 export default function RootLayout() {
-  return <Stack />;
+  return (
+    <SessionProvider>
+      <HealthProvider>
+        <Navigation />
+      </HealthProvider>
+    </SessionProvider>
+  );
+}
+
+function Navigation() {
+  const base = useColorScheme() === 'dark' ? DarkTheme : DefaultTheme;
+  const theme = useTheme();
+  const t = useCopy(commonCopy);
+  const { debugLabels } = useSession();
+  // Headers and screen transitions use the app palette, so nothing flashes a different background.
+  const navigationTheme = {
+    ...base,
+    colors: { ...base.colors, background: theme.background, card: theme.background, text: theme.text, border: theme.border },
+  };
+
+  return (
+    <ThemeProvider value={navigationTheme}>
+      <Stack
+        screenOptions={{
+          headerShadowVisible: false,
+          headerRight: debugLabels ? () => <ConnectionDot /> : undefined,
+        }}>
+        <Stack.Screen name="index" options={{ headerShown: false }} />
+        <Stack.Screen name="welcome" options={{ headerShown: false }} />
+        <Stack.Screen name="vendor/index" options={{ headerTitle: () => <HeaderTitle title={t.titles.vendor} /> }} />
+        <Stack.Screen name="vendor/(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="buyer/index" options={{ headerTitle: () => <HeaderTitle title={t.titles.buyer} /> }} />
+        <Stack.Screen name="buyer/(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="debug"
+          options={{ headerTitle: () => <HeaderTitle title={t.titles.debug} />, headerRight: undefined }}
+        />
+      </Stack>
+      <StatusBar style="auto" />
+    </ThemeProvider>
+  );
 }
