@@ -30,7 +30,7 @@ const deps: Deps = {
   pollSeconds: cfg.CHARGE_POLL_SECONDS,
   defaultLimits: { perPaymentLimit: BigInt(cfg.SEED_PER_PAYMENT_LIMIT), dailyLimit: BigInt(cfg.SEED_DAILY_LIMIT) },
 };
-const app = createApp(deps, { clientWalletAddress: cfg.OP_CLIENT_WALLET_ADDRESS });
+const app = createApp(deps, { clientWalletAddress: cfg.OP_CLIENT_WALLET_ADDRESS, publicUrl: cfg.PUBLIC_URL });
 
 // Express 5 hands listen errors (EADDRINUSE) to this callback instead of throwing.
 // shortcut: plain HTTP on the LAN; deploy behind HTTPS for anything beyond the demo Wi-Fi.

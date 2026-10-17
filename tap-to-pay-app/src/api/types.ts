@@ -110,3 +110,6 @@ export type VendorSummary = {
 
 // GET /vendors/:id/sales?status=PAID|CHARGING|FAILED&date=YYYY-MM-DD&limit=50: newest first, AWAITING_TAP left out.
 export type VendorSaleView = SaleView & { buyerName: string | null };
+
+// GET /sales/:id/pay-link: the payment page the QR opens, and a wa.me URL with the message ready to send.
+export type PayLink = { url: string; whatsappUrl: string; text: string };

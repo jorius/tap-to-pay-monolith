@@ -18,6 +18,8 @@ const schema = z.object({
   // Not validated at startup: an unknown zone fails on the first daily-cap check.
   DAILY_LIMIT_TZ: z.string().min(1).default('America/Bogota'),
   CHARGE_POLL_SECONDS: z.coerce.number().int().positive().default(8),
+  // The public base URL of the payment page that the QR and the WhatsApp link open; unset, taken from each request.
+  PUBLIC_URL: z.string().url().optional(),
 });
 
 export type Config = z.infer<typeof schema>;
