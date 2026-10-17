@@ -1,39 +1,54 @@
-# Paynela · Tap to Pay
+# Paynela
 
-**Cobra con el celular, sin datáfono.** El celular del comercio es la terminal y el del cliente es la tarjeta: con un toque (NFC), un QR o un link por WhatsApp, el dinero pasa de billetera a billetera con [Open Payments](https://openpayments.dev) sobre la red Interledger.
+**Del cobro diario al crédito.** Paynela le da a los pequeños comercios un historial financiero verificable: cada venta que cobran y cada servicio que pagan a tiempo queda registrado, y con eso generan un **resumen de capacidad de pago** para pedir un crédito. Los cobros y pagos van de billetera a billetera con [Open Payments](https://openpayments.dev) sobre la red Interledger.
 
 Proyecto de *Inteligencia Artesanal* para el Open Payments Hackathon, Ruta N, Medellín, octubre de 2026.
 
-## El problema y la idea
+## El problema
 
-Los pequeños comercios de Latinoamérica no pueden pagar un datáfono, y sus clientes cada vez cargan más el celular que efectivo. Open Payments le da a cada billetera una dirección pública y una forma estándar de autorizar pagos. Paynela usa eso para convertir dos celulares Android en terminal y tarjeta, sin red de tarjetas ni hardware extra.
+Millones de tenderos, vendedores de plaza y pequeños negocios en Latinoamérica venden todos los días pero **no pueden demostrarlo**. Cobran en efectivo, no tienen extractos ni contabilidad formal, y para un banco no tienen historial. Por eso, cuando necesitan crédito, terminan en el "gota a gota", con intereses abusivos.
+
+## La solución
+
+1. **Cobrar digital, fácil y sin datáfono.** El comercio cobra con su celular: con un QR, con un link por WhatsApp o con un toque NFC. El cliente paga desde su billetera, incluso sin instalar la app. Cada venta queda registrada.
+2. **Pagar sus servicios a tiempo, solos.** El comercio inscribe EPM, Claro, Tigo y otros servicios, y se pagan cada mes desde su billetera. Cada pago a tiempo suma a su historial de pagos.
+3. **Demostrar capacidad de pago.** Con esos datos, Paynela genera un **resumen financiero mensual en PDF** con lo que mira una entidad de crédito:
+   - ingreso mensual promedio y del mes más bajo, y su estabilidad;
+   - obligaciones mensuales y su peso sobre los ingresos;
+   - flujo neto mes a mes y capacidad de pago estimada;
+   - puntualidad en los pagos.
+
+   Cada resumen lleva un código de verificación.
 
 ## Qué hace
 
 | Para el comercio | Para el cliente |
 | --- | --- |
-| Cobrar con un toque NFC, un **QR** o un **link por WhatsApp** | Pagar acercando el celular, escaneando un QR o abriendo un link, incluso sin la app |
-| Ver sus ventas del día, la semana y el mes | Dar permiso **una sola vez** a su billetera, con un tope diario |
-| **Pagos de servicios** (EPM, Claro, Tigo…) que se pagan solos cada mes | Topes por pago y por día que el servicio hace cumplir |
-| **Resumen financiero en PDF** con su capacidad de pago, para pedir un crédito | Varias billeteras, incluso en monedas distintas |
+| **Resumen financiero en PDF** con su capacidad de pago de 6 meses, para pedir un crédito | Pagar escaneando un QR, abriendo un link o acercando el celular, incluso sin la app |
+| **Pagos de servicios** (EPM, Claro, Tigo…) que se pagan solos cada mes y forman su historial | Dar permiso **una sola vez** a su billetera, con un tope diario |
+| Cobrar con **QR**, **link por WhatsApp** o toque **NFC**, y ver sus ventas y movimientos | Topes por pago y por día que el servicio hace cumplir |
+|  | Varias billeteras, incluso en monedas distintas |
 
 ## Cómo funciona
 
 ```
- Celular del cliente  ──NFC / QR / link──►  Celular del comercio
-                                                   │ HTTP
-                                                   ▼
-                                     Servicio (tap-to-pay-svc)
-                                     reglas, topes, firma cada llamada
-                                                   │ Open Payments
-                                   ┌───────────────┴───────────────┐
-                                   ▼                               ▼
-                         Billetera del cliente  ──Interledger──►  Billetera del comercio
+  Cobros (QR · link · NFC)      Pagos de servicios (cada mes)
+            │                               │
+            ▼                               ▼
+   ┌─────────────────────────────────────────────────────┐
+   │ Servicio Paynela (tap-to-pay-svc)                   │
+   │ registra cada movimiento, aplica topes y firma cada │
+   │ llamada a las billeteras con Open Payments          │
+   └─────────────────────────────────────────────────────┘
+            │                               │
+            ▼                               ▼
+   Billeteras (Interledger)      Resumen financiero en PDF
+   el dinero va de billetera     ingresos, obligaciones y
+   a billetera                   capacidad de pago, mes a mes
 ```
 
-- **Los celulares no tienen llaves ni tokens.** Solo le piden cosas al servicio.
-- **El servicio** valida los topes, firma cada llamada a las billeteras y guarda el permiso (grant) que el cliente dio una vez.
-- **El dinero** nunca pasa por el servicio: va de billetera a billetera.
+- **El dinero** nunca pasa por Paynela: va de billetera a billetera. Paynela registra lo que pidió y lo que las billeteras respondieron, y de ese registro sale el resumen.
+- **Los celulares** no tienen llaves ni tokens. El servicio firma cada llamada y guarda el permiso que el cliente, o el comercio para sus servicios, dio una sola vez.
 
 ## Qué hay en el repositorio
 
@@ -113,7 +128,9 @@ npx expo start --clear
 
 Escanea el QR de la terminal con la cámara del iPhone o con Expo Go en Android. El celular tiene que estar **en el mismo Wi-Fi** que el computador.
 
-### 4. Prueba cada forma de pago
+### 4. Recorre el flujo: de vender a pedir un crédito
+
+El recorrido completo es: el comercio **vende** (b, c, d), **paga sus servicios** (e) y **descarga su resumen financiero** (f). El resumen se arma con lo que se hizo en los pasos anteriores, así que entre más ventas y pagos, más completo sale.
 
 En Expo Go, al abrir la app eliges el rol: **comercio** o **cliente**. Lo ideal son dos celulares, uno por rol. Con uno solo, recarga la app (tecla `r` en la terminal de Metro) para volver a elegir el rol.
 
@@ -134,19 +151,19 @@ npm run grant:buyer -- --buyer <dirección del cliente>
 1. Comercio: mientras el cobro espera, escribe el celular del cliente y toca **Enviar**. WhatsApp se abre con el mensaje listo.
 2. El cliente abre el link: puede **pagar desde el navegador escribiendo su billetera**, sin la app, o copiar el código y pegarlo en *Pagar con QR o link*.
 
-**d. Cobro con NFC.** Requiere dos Android con un build propio.
+**d. Cobro con NFC (opcional).** Requiere dos Android con un build propio.
 ```bash
 cd tap-to-pay-app
 npx expo run:android --device "<nombre del celular>"   # uno por celular
 ```
 El cliente activa su tarjeta en *Pagar*. El comercio cobra y el cliente acerca su celular a la parte de atrás del celular del comercio. Requisitos y diagnóstico de NFC: SDD, sección 14.
 
-**e. Pagos de servicios del comercio.**
+**e. Pagos de servicios del comercio: el historial de pagos.**
 1. Comercio: *Más → Pagos de servicios → Añadir pago*. Elige EPM, Claro o Tigo, o *Otro servicio*, y escribe la referencia, el monto y el día del mes.
 2. El comercio paga desde su propia billetera, así que necesita dar permiso una vez. La pantalla muestra el comando; córrelo en `tap-to-pay-svc`.
 3. Toca **Pagar ahora**, o espera al día elegido: se paga solo a las 8:00 a. m.
 
-**f. Resumen financiero en PDF.**
+**f. Resumen financiero en PDF: el resultado para pedir un crédito.**
 Comercio: *Más → Mi historial de negocio*. Elige el mes y descarga el PDF:
 - **Hoja 1, capacidad de pago de 6 meses:** ingresos, estabilidad, obligaciones, flujo neto y pagos al día.
 - **Hoja 2, ventas del mes.**
