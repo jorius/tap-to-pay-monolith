@@ -145,28 +145,67 @@ function linkView(
   };
 }
 
+/**
+ * The WhatsApp message: who charges, how much, for what, a reference, the link, when it expires, how to pay and a
+ * safety note. *text* is bold in WhatsApp; the link sits on its own line so WhatsApp makes it tappable.
+ */
 function whatsappMessage(deps: Deps, sale: SaleRow, vendorName: string, url: string, lang: LinkLang): string {
   const t = text[lang];
-  const amount = `${formatAmount(sale.amount, sale.assetScale)} ${sale.assetCode}`;
-  const expires = new Intl.DateTimeFormat(lang === 'es' ? 'es-CO' : 'en-US', {
-    timeZone: deps.timeZone,
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(sale.payCodeExpiresAt!);
+  const when = (date: Date) =>
+    new Intl.DateTimeFormat(lang === 'es' ? 'es-CO' : 'en-US', {
+      timeZone: deps.timeZone,
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    }).format(date);
   return [
-    t.greeting(vendorName, amount),
-    ...(sale.description ? [`${t.concept}: ${sale.description}`] : []),
-    `${t.payHere}: ${url}`,
-    `${t.expires}: ${expires}`,
+    t.hello,
+    t.requested(vendorName),
+    '',
+    `💰 *${t.amount}:* ${localMoney(sale.amount, sale.assetScale, sale.assetCode, lang)}`,
+    ...(sale.description ? [`📝 *${t.concept}:* ${sale.description}`] : []),
+    `🧾 *${t.reference}:* ${sale.payCode}`,
+    `📅 *${t.date}:* ${when(sale.createdAt)}`,
+    '',
+    `👉 *${t.payHere}:*`,
+    url,
+    '',
+    `⏰ *${t.expires}:* ${when(sale.payCodeExpiresAt!)}`,
+    t.afterExpiry,
+    '',
+    `*${t.howTitle}*`,
+    ...t.how.map((step, i) => `${i + 1}. ${step}`),
+    '',
+    `🔒 ${t.safety(vendorName)}`,
   ].join('\n');
+}
+
+/** As the app shows money: es-CO groups with "." and decimals with ",", en-US the other way; the asset code last. */
+function localMoney(amount: bigint, scale: number, assetCode: string, lang: LinkLang): string {
+  const [whole, fraction] = formatAmount(amount, scale).split('.');
+  const [group, decimal] = lang === 'es' ? ['.', ','] : [',', '.'];
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, group);
+  return `${fraction === undefined ? grouped : grouped + decimal + fraction} ${assetCode}`;
 }
 
 const text = {
   es: {
-    greeting: (vendor: string, amount: string) => `Hola, ${vendor} te envía un cobro de ${amount}.`,
+    hello: 'Hola 👋',
+    requested: (vendor: string) => `*${vendor}* te envió una solicitud de pago por Tap to Pay.`,
+    amount: 'Monto',
     concept: 'Concepto',
-    payHere: 'Págalo con Tap to Pay',
+    reference: 'Referencia',
+    date: 'Fecha',
+    payHere: 'Paga aquí',
     expires: 'Vence',
+    afterExpiry: 'Si vence, pídele al comercio un link nuevo.',
+    howTitle: '¿Cómo pagar?',
+    how: [
+      'Abre el link de arriba.',
+      'Toca *Pagar en la app*. También puedes abrir Tap to Pay → Tarjeta → *Pagar con QR o link* y pegarlo.',
+      'Revisa el monto, elige tu billetera y toca *Pagar*.',
+    ],
+    safety: (vendor: string) =>
+      `Antes de pagar, confirma que el comercio sea *${vendor}*. Tap to Pay nunca te pide contraseñas ni códigos por WhatsApp.`,
     title: (vendor: string, amount: string) => `Cobro de ${vendor}: ${amount}`,
     open: 'Pagar en la app',
     paid: 'Este cobro ya fue pagado.',
@@ -176,10 +215,23 @@ const text = {
     notFound: 'Link de pago no encontrado',
   },
   en: {
-    greeting: (vendor: string, amount: string) => `Hi, ${vendor} is requesting ${amount}.`,
+    hello: 'Hi 👋',
+    requested: (vendor: string) => `*${vendor}* sent you a payment request through Tap to Pay.`,
+    amount: 'Amount',
     concept: 'For',
-    payHere: 'Pay with Tap to Pay',
+    reference: 'Reference',
+    date: 'Date',
+    payHere: 'Pay here',
     expires: 'Expires',
+    afterExpiry: 'If it expires, ask the vendor for a new link.',
+    howTitle: 'How to pay',
+    how: [
+      'Open the link above.',
+      'Tap *Pay in the app*. You can also open Tap to Pay → Card → *Pay with a QR or link* and paste it.',
+      'Check the amount, pick your wallet and tap *Pay*.',
+    ],
+    safety: (vendor: string) =>
+      `Before paying, make sure the vendor is *${vendor}*. Tap to Pay never asks for passwords or codes on WhatsApp.`,
     title: (vendor: string, amount: string) => `Payment to ${vendor}: ${amount}`,
     open: 'Pay in the app',
     paid: 'This payment has already been made.',

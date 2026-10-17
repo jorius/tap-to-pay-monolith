@@ -43,6 +43,15 @@ describe('createSale with a description', () => {
 });
 
 describe('createPaymentLink', () => {
+  it('groups thousands as the app does', async () => {
+    const ctx = setup();
+    const sale = await createSale(ctx.deps, ctx.vendor.id, '1234500');
+    const es = await createPaymentLink(ctx.deps, sale.id, PUBLIC_BASE_URL);
+    expect(es.message).toContain('12.345,00 USD');
+    const en = await createPaymentLink(ctx.deps, sale.id, PUBLIC_BASE_URL, { lang: 'en' });
+    expect(en.message).toContain('12,345.00 USD');
+  });
+
   it('builds the link, the app URL, the QR and the WhatsApp message', async () => {
     const ctx = setup();
     const { sale, link } = await saleWithLink(ctx);
@@ -55,9 +64,14 @@ describe('createPaymentLink', () => {
       qrSvgUrl: `${PUBLIC_BASE_URL}/pay/${link.code}/qr.svg`,
       expiresAt: '2026-10-14T16:00:00.000Z',
     });
-    expect(link.message).toContain('Tienda te envía un cobro de 12.00 USD');
-    expect(link.message).toContain('Concepto: Almuerzo');
-    expect(link.message).toContain(link.url);
+    expect(link.message).toContain('*Tienda* te envió una solicitud de pago');
+    expect(link.message).toContain('💰 *Monto:* 12,00 USD');
+    expect(link.message).toContain('📝 *Concepto:* Almuerzo');
+    expect(link.message).toContain(`🧾 *Referencia:* ${link.code}`);
+    expect(link.message).toContain('¿Cómo pagar?');
+    expect(link.message).toContain('confirma que el comercio sea *Tienda*');
+    // The link alone on its line, so WhatsApp makes it tappable.
+    expect(link.message.split('\n')).toContain(link.url);
     expect(link.whatsappUrl).toBe(`https://wa.me/?text=${encodeURIComponent(link.message)}`);
   });
 
@@ -66,8 +80,10 @@ describe('createPaymentLink', () => {
     const sale = await createSale(ctx.deps, ctx.vendor.id, '1200');
     const link = await createPaymentLink(ctx.deps, sale.id, PUBLIC_BASE_URL, { phone: '+57 300 123-4567', lang: 'en' });
     expect(link.whatsappUrl.startsWith('https://wa.me/573001234567?text=')).toBe(true);
-    expect(link.message).toContain('Tienda is requesting 12.00 USD');
-    expect(link.message).not.toContain('For:');
+    expect(link.message).toContain('*Tienda* sent you a payment request');
+    expect(link.message).toContain('💰 *Amount:* 12.00 USD');
+    expect(link.message).not.toContain('*For:*');
+    expect(link.message).toContain('How to pay');
     await expect(createPaymentLink(ctx.deps, sale.id, PUBLIC_BASE_URL, { phone: '300' })).rejects.toMatchObject({
       status: 400,
     });
