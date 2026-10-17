@@ -4,7 +4,7 @@ import type { DebugWallet, DebugWallets } from '@/api/types';
 import { BigButton } from '@/components/big-button';
 import { StatusPill } from '@/components/status-pill';
 import { ThemedText } from '@/components/themed-text';
-import { Fill } from '@/constants/theme';
+import { Brand } from '@/constants/theme';
 import { useApi } from '@/hooks/use-api';
 import { useTheme } from '@/hooks/use-theme';
 import { defineCopy, useCopy, useLang } from '@/i18n';
@@ -38,8 +38,8 @@ const copy = defineCopy(
   },
 );
 
-// Role badges in the 700 tones, so the white text keeps AA contrast.
-const BADGE = { client: Fill.service, buyer: Fill.buyer, vendor: Fill.vendor } as const;
+// Role badges in the brand's dark tones, so the white text keeps AA contrast.
+const BADGE = { client: Brand.tealDark, buyer: Brand.teal, vendor: Brand.caramelDark } as const;
 
 // The service's live view of the Test Wallet addresses it knows (GET /debug/wallets; design: DebugTools, DebugStates).
 export function WalletsPanel() {
@@ -67,7 +67,7 @@ export function WalletsPanel() {
             ? t.checkedAt(new Date(data.checkedAt).toLocaleTimeString(lang === 'es' ? 'es-CO' : 'en-US'))
             : ''}
         </ThemedText>
-        <BigButton label={t.refresh} color={Fill.service} onPress={reload} />
+        <BigButton label={t.refresh} color={Brand.tealDark} onPress={reload} />
       </View>
     </View>
   );
@@ -77,7 +77,7 @@ function WalletRow({ wallet }: { wallet: DebugWallet }) {
   const theme = useTheme();
   const t = useCopy(copy);
   return (
-    <View style={[styles.row, { borderColor: theme.border }]}>
+    <View style={[styles.row, { borderColor: theme.border, backgroundColor: theme.surface }]}>
       <View style={styles.rowHead}>
         <View style={[styles.badge, { backgroundColor: BADGE[wallet.role] }]}>
           <Text style={styles.badgeText}>{t.role[wallet.role]}</Text>
@@ -98,7 +98,7 @@ function WalletRow({ wallet }: { wallet: DebugWallet }) {
           <StatusPill tone={wallet.hasGrant ? 'ok' : 'neutral'} label={wallet.hasGrant ? t.granted : t.noGrant} />
         )}
       </View>
-      {wallet.error !== null && <Text style={[styles.error, { color: theme.badInk }]}>{wallet.error}</Text>}
+      {wallet.error !== null && <Text style={[styles.error, { color: theme.outflow }]}>{wallet.error}</Text>}
     </View>
   );
 }
@@ -106,12 +106,12 @@ function WalletRow({ wallet }: { wallet: DebugWallet }) {
 const styles = StyleSheet.create({
   panel: { gap: 10 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' },
-  title: { fontSize: 17, fontWeight: '800' },
+  title: { fontSize: 17, fontWeight: '600' },
   row: { borderWidth: 1, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 14, gap: 6 },
   rowHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   badge: { borderRadius: 6, paddingHorizontal: 8, minHeight: 22, justifyContent: 'center' },
   badgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
-  name: { fontSize: 16, fontWeight: '700' },
+  name: { fontSize: 16, fontWeight: '600' },
   asset: { fontSize: 13, fontWeight: '700' },
   mono: { fontFamily: 'monospace', fontSize: 11.5 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },

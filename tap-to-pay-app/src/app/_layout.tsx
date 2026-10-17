@@ -42,8 +42,14 @@ function Navigation() {
         <Stack.Screen name="welcome" options={{ headerShown: false }} />
         <Stack.Screen name="vendor/index" options={{ headerTitle: () => <HeaderTitle title={t.titles.vendor} /> }} />
         <Stack.Screen name="vendor/(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="vendor/wallets" options={{ headerTitle: () => <HeaderTitle title={t.titles.wallets} /> }} />
         <Stack.Screen name="buyer/index" options={{ headerTitle: () => <HeaderTitle title={t.titles.buyer} /> }} />
         <Stack.Screen name="buyer/(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="buyer/grant" options={{ headerTitle: () => <HeaderTitle title={t.titles.grant} /> }} />
+        <Stack.Screen name="buyer/limits" options={{ headerTitle: () => <HeaderTitle title={t.titles.limits} /> }} />
+        <Stack.Screen name="buyer/activate" options={{ headerTitle: () => <HeaderTitle title={t.titles.activate} /> }} />
+        <Stack.Screen name="grant-finish" options={{ headerShown: false, animation: 'none' }} />
+        <Stack.Screen name="settings" options={{ headerTitle: () => <HeaderTitle title={t.titles.settings} /> }} />
         <Stack.Screen
           name="debug"
           options={{ headerTitle: () => <HeaderTitle title={t.titles.debug} />, headerRight: undefined }}

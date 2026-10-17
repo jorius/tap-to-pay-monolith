@@ -1,5 +1,5 @@
 {
-  "name": "tap-to-pay-app",
+  "name": "paynela-app",
   "main": "expo-router/entry",
   "version": "1.0.0",
   "dependencies": {
@@ -14,6 +14,7 @@
     "expo-image": "~57.0.5",
     "expo-linking": "~57.0.13",
     "expo-router": "~57.0.28",
+    "expo-speech": "~57.0.3",
     "expo-splash-screen": "~57.0.10",
     "expo-status-bar": "~57.0.1",
     "expo-symbols": "~57.0.3",
@@ -38,6 +39,8 @@
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
+    "build:vendor": "scripts/build-apk.sh vendor release",
+    "build:buyer": "scripts/build-apk.sh buyer release",
     "lint": "expo lint"
   },
   "private": true

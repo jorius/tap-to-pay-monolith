@@ -14,9 +14,10 @@ export function time(iso: string, lang: Lang, withSeconds = false) {
   });
 }
 
+// Grey for a refused or failed sale: it moved no money (Paynela design system).
 export const STATUS_TONE: Record<SaleStatus, 'ok' | 'bad' | 'wait' | 'neutral'> = {
   PAID: 'ok',
-  FAILED: 'bad',
+  FAILED: 'neutral',
   CHARGING: 'wait',
   AWAITING_TAP: 'neutral',
 };
@@ -71,3 +72,13 @@ export function providerName(walletAddress: string) {
   const host = walletAddress.match(/^https?:\/\/([^/]+)/)?.[1] ?? walletAddress;
   return host === 'ilp.interledger-test.dev' ? 'Interledger Test Wallet' : host;
 }
+
+// "pesos", "dólares": the currency as a vendor says it (design: Más, Dónde recibo la plata); other assets keep their code.
+const CURRENCY: Record<string, Record<Lang, string>> = {
+  COP: { es: 'pesos', en: 'pesos' },
+  USD: { es: 'dólares', en: 'dollars' },
+  EUR: { es: 'euros', en: 'euros' },
+  MXN: { es: 'pesos mexicanos', en: 'Mexican pesos' },
+};
+
+export const currencyName = (assetCode: string, lang: Lang) => CURRENCY[assetCode]?.[lang] ?? assetCode;

@@ -18,6 +18,6 @@ export function HeaderTitle({ title }: { title: string }) {
 }
 
 const styles = StyleSheet.create({
-  title: { fontSize: 20, lineHeight: 24, fontWeight: '800' },
+  title: { fontSize: 20, lineHeight: 24, fontWeight: '600' },
   app: { fontSize: 12, lineHeight: 16 },
 });

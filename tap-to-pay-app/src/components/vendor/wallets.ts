@@ -1,6 +1,6 @@
 import { api } from '@/api/client';
 import type { VendorView, VendorWalletView } from '@/api/types';
-import { addressPath } from '@/components/vendor/format';
+import { fill } from '@/components/vendor/format';
 
 // shortcut: a service without multi-wallet vendors sends no `wallets`; its single wallet stands in as the only one.
 // Delete once every running service answers with wallets.
@@ -24,8 +24,9 @@ export function defaultFirst(wallets: VendorWalletView[]) {
   return [...wallets].sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
 }
 
-// "USD · /tourism": enough to tell a vendor's wallets apart in a filter chip.
-export const walletLabel = (wallet: VendorWalletView) => `${wallet.assetCode} · ${addressPath(wallet.walletAddress)}`;
+// The name the wallet publishes, else "Billetera COP" (`template` is vendorCopy.walletNamed).
+export const walletName = (wallet: VendorWalletView, template: string) =>
+  wallet.publicName || fill(template, { code: wallet.assetCode });
 
 // Writes on the receiving wallets; each answers with the fresh VendorView, which `replace` swaps into the cache.
 export function vendorWalletActions(vendor: VendorView, replace: (next: VendorView) => void) {

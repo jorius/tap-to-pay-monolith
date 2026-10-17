@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { apiUrl } from '@/api/client';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Brand } from '@/constants/theme';
+import { Fills } from '@/constants/theme';
 import { useHealth } from '@/hooks/use-health';
 import { useTheme } from '@/hooks/use-theme';
 import { defineCopy, useCopy } from '@/i18n';
@@ -44,10 +44,10 @@ export function ConnectionLabel() {
   const t = useCopy(copy);
   const state =
     health.status === 'connected'
-      ? { title: t.connected, ink: theme.okInk, dot: Brand.ok }
+      ? { title: t.connected, ink: theme.income, dot: Fills.income }
       : health.status === 'checking'
-        ? { title: t.checking, ink: theme.muted, dot: Brand.postgres }
-        : { title: t.unreachable, ink: theme.badInk, dot: Brand.bad };
+        ? { title: t.checking, ink: theme.muted, dot: Fills.refused }
+        : { title: t.unreachable, ink: theme.outflow, dot: Fills.outflow };
 
   return (
     <ThemedView card>
@@ -67,7 +67,7 @@ export function ConnectionLabel() {
       )}
       {health.status === 'checking' && <ThemedText type="caption">{t.firstCheck(apiUrl)}</ThemedText>}
       {health.status === 'unreachable' && (
-        <ThemedText type="caption" style={{ color: theme.badInk }}>
+        <ThemedText type="caption" style={{ color: theme.outflow }}>
           {health.code === 'NETWORK' ? t.network(apiUrl) : `${health.code}: ${health.message}`}
         </ThemedText>
       )}
@@ -87,7 +87,7 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-const DOT_COLORS = { checking: Brand.postgres, connected: Brand.ok, unreachable: Brand.bad } as const;
+const DOT_COLORS = { checking: Fills.refused, connected: Fills.income, unreachable: Fills.outflow } as const;
 
 // Compact pill for every header, so the connection state is always visible; it opens /debug (design header).
 export function ConnectionDot() {
@@ -100,7 +100,7 @@ export function ConnectionDot() {
       accessibilityRole="button"
       accessibilityLabel={t.api[status]}
       onPress={() => router.push('/debug')}
-      style={({ pressed }) => [styles.pill, { borderColor: theme.border, opacity: pressed ? 0.7 : 1 }]}>
+      style={({ pressed }) => [styles.pill, { borderColor: theme.border, backgroundColor: theme.surface, opacity: pressed ? 0.7 : 1 }]}>
       <View style={[styles.circle, { backgroundColor: DOT_COLORS[status] }]} />
       <Text style={[styles.api, { color: theme.text }]}>API</Text>
     </Pressable>
@@ -111,7 +111,7 @@ const styles = StyleSheet.create({
   section: { fontSize: 13, fontWeight: '700', letterSpacing: 0.5 },
   status: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   statusDot: { width: 12, height: 12, borderRadius: 6 },
-  statusText: { fontSize: 22, fontWeight: '800' },
+  statusText: { fontSize: 22, fontWeight: '600' },
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 },
   value: { flex: 1, textAlign: 'right', fontFamily: 'monospace', fontSize: 12 },
   pill: {

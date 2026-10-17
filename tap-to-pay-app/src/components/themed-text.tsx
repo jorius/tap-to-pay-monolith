@@ -11,7 +11,7 @@ export function ThemedText({ type = 'default', style, ...rest }: Props) {
 
 const styles = StyleSheet.create({
   default: { fontSize: 16, lineHeight: 24 },
-  title: { fontSize: 28, lineHeight: 34, fontWeight: '700' },
+  title: { fontSize: 28, lineHeight: 34, fontWeight: '600' },
   subtitle: { fontSize: 20, lineHeight: 28, fontWeight: '600' },
   caption: { fontSize: 14, lineHeight: 20 },
 });

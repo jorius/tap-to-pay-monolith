@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "Tap to Pay",
-    "slug": "tap-to-pay-app",
+    "name": "Paynela",
+    "slug": "paynela-app",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
-    "scheme": "taptopayapp",
+    "icon": "./assets/images/paynela-icon.png",
+    "scheme": "paynela",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon"
@@ -13,10 +13,9 @@
     "android": {
       "package": "co.inteligenciaartesanal.taptopay",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "backgroundColor": "#FFFFFF",
+        "foregroundImage": "./assets/images/paynela-adaptive-foreground.png",
+        "monochromeImage": "./assets/images/paynela-adaptive-monochrome.png"
       },
       "predictiveBackGestureEnabled": false
     },
@@ -29,9 +28,9 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "backgroundColor": "#FAFBFB",
+          "image": "./assets/images/paynela-logo.png",
+          "imageWidth": 150
         }
       ]
     ],

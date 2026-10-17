@@ -15,6 +15,9 @@ export type SaleView = {
   vendorWalletId: string | null;
   // Which of the buyer's wallets paid; null until the claim (and for refusals with no known buyer).
   buyerWalletId: string | null;
+  // The paying wallet's publicName, else the buyer's registered name: on POST /sales/:id/charge, GET /sales/:id and
+  // the vendor's list; null while no buyer is known.
+  buyerName?: string | null;
   // What the buyer pays in the buyer's own asset; null until known (a cross-asset sale learns it from the quote).
   debitAmount: string | null;
   debitAmountFormatted: string | null;
@@ -76,6 +79,9 @@ export type VendorView = Omit<VendorWalletView, 'id' | 'isDefault'> & {
 export type Health = { ok: boolean; clientWalletAddress: string };
 
 export type BuyerSales = { remainingToday: string; sales: SaleView[] };
+
+// POST /buyers/:id/wallets/:walletId/grant: the wallet page where the buyer consents.
+export type GrantStart = { redirectUrl: string };
 
 // GET /debug/wallets: the service's live view of the Test Wallet addresses it knows (debug surface, not in SDD §9).
 export type DebugWallet = {

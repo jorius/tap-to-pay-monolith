@@ -9,6 +9,7 @@ import {
   type WalletInfo,
 } from '../open-payments/types.js';
 import { HttpError } from './errors.js';
+import type { PendingGrants } from './grants.js';
 import { checkLimits, checkWallet, dayRange, sameAsset, type ChargeCheck } from './limits.js';
 import { parseAmount, toAmount } from './money.js';
 import { ownVendorWallet } from './vendors.js';
@@ -23,6 +24,8 @@ export type Deps = {
   pollSeconds: number;
   /** Caps a wallet added through the API starts with (SEED_PER_PAYMENT_LIMIT, SEED_DAILY_LIMIT). */
   defaultLimits: Limits;
+  /** Authorizations started from the app and not finished yet. */
+  pendingGrants: PendingGrants;
 };
 
 /** POST /sales: received into `walletId`, one of the vendor's wallets, else the default one, and priced in its asset. */
@@ -47,8 +50,13 @@ export async function createSale(
   return saleView(sale, wallet.publicName ?? vendor.name);
 }
 
-/** The per-sale orchestration of SDD section 10, steps 3 to 9. */
+/** POST /sales/:id/charge: the charge, answered with the buyer named for the vendor's screen. */
 export async function chargeSale(deps: Deps, saleId: string, walletAddress: string): Promise<SaleView> {
+  return withBuyerName(deps.repo, await runCharge(deps, saleId, walletAddress));
+}
+
+/** The per-sale orchestration of SDD section 10, steps 3 to 9. */
+async function runCharge(deps: Deps, saleId: string, walletAddress: string): Promise<SaleView> {
   const { repo, op } = deps;
 
   // 3. The sale and the paying wallet, whichever buyer owns it.
@@ -163,8 +171,14 @@ export async function chargeSale(deps: Deps, saleId: string, walletAddress: stri
 /** GET /sales/:id: a CHARGING sale is re-checked against the vendor's wallet first. */
 export async function refreshSale(deps: Deps, saleId: string): Promise<SaleView> {
   const sale = await loadSale(deps.repo, saleId);
-  if (sale.status !== 'CHARGING') return saleView(sale);
-  return saleView(await waitForPayment(deps, sale, 1));
+  return withBuyerName(deps.repo, saleView(sale.status === 'CHARGING' ? await waitForPayment(deps, sale, 1) : sale));
+}
+
+/** Names the buyer as the vendor's sales list does: the paying wallet's publicName, else the registered name. */
+async function withBuyerName(repo: Repo, view: SaleView): Promise<SaleView> {
+  const buyer = view.buyerId ? await repo.getBuyer(view.buyerId) : null;
+  const wallet = buyer?.wallets.find((w) => w.id === view.buyerWalletId);
+  return { ...view, buyerName: wallet?.publicName ?? buyer?.name ?? null };
 }
 
 /** Reads the incoming payment up to `attempts` times, one second apart. Never fails the sale. */

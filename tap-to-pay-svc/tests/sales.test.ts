@@ -458,3 +458,25 @@ describe('chargeSale', () => {
     });
   });
 });
+
+describe('buyerName on the sale routes', () => {
+  it("is the paying wallet's publicName, else the buyer's registered name, on charge and refresh", async () => {
+    const ctx = setup();
+    const sale = await newSale(ctx);
+    expect((await chargeSale(ctx.deps, sale.id, BUYER_WALLET)).buyerName).toBe('Ana');
+    ctx.repo.wallets.get(ctx.buyer.wallet.id)!.publicName = 'Ana M.';
+    expect((await refreshSale(ctx.deps, sale.id)).buyerName).toBe('Ana M.');
+  });
+
+  it('names a refused known buyer, and is null for a BUYER_UNKNOWN refusal', async () => {
+    const ctx = setup();
+    ctx.repo.wallets.get(ctx.buyer.wallet.id)!.grantAccessToken = null;
+    const noGrant = await chargeSale(ctx.deps, (await newSale(ctx)).id, BUYER_WALLET);
+    expect(noGrant).toMatchObject({ status: 'FAILED', failureCode: 'GRANT_MISSING', buyerName: 'Ana' });
+
+    const sale = await newSale(ctx);
+    const unknown = await chargeSale(ctx.deps, sale.id, 'https://ilp.test/nobody');
+    expect(unknown).toMatchObject({ status: 'FAILED', failureCode: 'BUYER_UNKNOWN', buyerName: null });
+    expect((await refreshSale(ctx.deps, sale.id)).buyerName).toBeNull();
+  });
+});

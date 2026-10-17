@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { buyerAmount, formatMoney } from '@/api/money';
 import type { BuyerSales, SaleView } from '@/api/types';
@@ -7,10 +7,9 @@ import { Initials } from '@/components/buyer/initials';
 import { LoadState } from '@/components/buyer/load-state';
 import { useRefusalText } from '@/components/buyer/refusal';
 import { Screen } from '@/components/screen';
-import { StatusPill } from '@/components/status-pill';
 import { ThemedText } from '@/components/themed-text';
-import { STATUS_TONE } from '@/components/vendor/format';
-import { Brand } from '@/constants/theme';
+import { ThemedView } from '@/components/themed-view';
+import { FilterChips } from '@/components/vendor/chips';
 import { useApi } from '@/hooks/use-api';
 import { useBuyerCards } from '@/hooks/use-buyer-cards';
 import { useSession } from '@/hooks/use-session';
@@ -19,37 +18,36 @@ import { defineCopy, useCopy, useLang, type Lang } from '@/i18n';
 
 const copy = defineCopy(
   {
-    card: 'Billetera',
-    leftToday: 'Disponible hoy',
     period: 'Periodo',
     today: 'Hoy',
-    week: 'Semana',
-    empty: 'Sin cobros en este periodo.',
-    which: 'Aparecen los cobros a tus billeteras: pagados, en curso y rechazados por tus topes o tu autorización.',
-    live: 'Se actualiza cada 3 s mientras esta pantalla está abierta.',
-    status: { PAID: 'PAGADO', CHARGING: 'COBRANDO', FAILED: 'RECHAZADO' } as Record<string, string>,
+    week: 'Últimos 7 días',
+    spent: { today: 'Gastaste hoy', week: 'Gastaste en 7 días' },
+    left: 'Te quedan',
+    wallet: 'Billetera',
+    empty: 'Sin movimientos en este periodo.',
+    refused: (reason: string) => `No se pagó · ${reason}`,
+    charging: 'En curso',
   },
   {
-    card: 'Wallet',
-    leftToday: 'Left today',
     period: 'Period',
     today: 'Today',
-    week: 'Week',
-    empty: 'No charges in this period.',
-    which: 'Charges to your wallets appear here: paid, in progress, and refused by your limits or authorization.',
-    live: 'Refreshes every 3 s while this screen is open.',
-    status: { PAID: 'PAID', CHARGING: 'CHARGING', FAILED: 'REFUSED' } as Record<string, string>,
+    week: 'Last 7 days',
+    spent: { today: 'Spent today', week: 'Spent in 7 days' },
+    left: 'You have left',
+    wallet: 'Wallet',
+    empty: 'No activity in this period.',
+    refused: (reason: string) => `Not paid · ${reason}`,
+    charging: 'In progress',
   },
 );
 
 type Period = 'today' | 'week';
 
-// The charges of one of the buyer's wallets (design: BuyerHistory), re-read every 3 s while focused (SDD §6). The
-// service returns the last 20; the period filter runs on the phone over those.
+// The buyer's movements (design: Movimientos), re-read every 3 s while focused (SDD §6). The period filter runs on
+// the phone over the sales the service lists.
 export default function HistoryScreen() {
   const { buyerId } = useSession();
   const { wallets, defaultWallet, reload: reloadCards } = useBuyerCards();
-  const refusal = useRefusalText();
   const theme = useTheme();
   const t = useCopy(copy);
   const lang = useLang();
@@ -57,137 +55,126 @@ export default function HistoryScreen() {
   const [picked, setPicked] = useState<string | null>(null);
   // A picked wallet that was since removed falls back to the default one.
   const wallet = wallets.find((w) => w.id === picked) ?? defaultWallet;
-  const query = wallet ? `?walletId=${encodeURIComponent(wallet.id)}` : '';
+  // shortcut: the service lists at most 100 sales, so a very busy week may be cut short; page the list to go further.
+  const query = `?limit=100${wallet ? `&walletId=${encodeURIComponent(wallet.id)}` : ''}`;
   const { data, error, loading, reload } = useApi<BuyerSales>(buyerId ? `/buyers/${buyerId}/sales${query}` : null, {
     pollMs: 3000,
   });
-  // Which wallet paid: its currency and the path of its address ("USD · /ana").
-  const paidWith = (sale: SaleView) => {
-    const w = wallets.find((x) => x.id === sale.buyerWalletId);
-    return w ? `${w.assetCode} · ${w.walletAddress.replace(/^https?:\/\/[^/]+/, '') || w.walletAddress}` : null;
-  };
 
   const since = new Date();
   since.setHours(0, 0, 0, 0);
   if (period === 'week') since.setDate(since.getDate() - 6);
   const sales = data?.sales.filter((sale) => new Date(sale.createdAt) >= since) ?? [];
+  // A paid sale is debited in the paying wallet's asset, so the minor units add up.
+  const spent = sales
+    .filter((sale) => sale.status === 'PAID')
+    .reduce((sum, sale) => sum + BigInt(sale.debitAmount ?? sale.amount), BigInt(0));
+  const money = (amount: string) => (wallet ? formatMoney(amount, wallet.assetScale, wallet.assetCode, lang) : '—');
 
   return (
     <Screen onRefresh={() => Promise.all([reload(), reloadCards()])}>
-      {wallets.length > 1 && (
-        <Chips
-          label={t.card}
-          options={wallets.map((w) => ({ key: w.id, text: w.assetCode }))}
-          selected={wallet?.id ?? null}
-          onSelect={setPicked}
-        />
-      )}
-
-      <View style={[styles.left, { backgroundColor: theme.card }]}>
-        <ThemedText type="caption" style={styles.leftLabel}>
-          {t.leftToday}
-        </ThemedText>
-        <Text style={[styles.leftAmount, { color: theme.text }]}>
-          {data && wallet ? formatMoney(data.remainingToday, wallet.assetScale, wallet.assetCode, lang) : '—'}
-        </Text>
-      </View>
-
-      <Chips
+      <FilterChips
         label={t.period}
         options={[
-          { key: 'today', text: t.today },
-          { key: 'week', text: t.week },
+          { value: 'today', label: t.today },
+          { value: 'week', label: t.week },
         ]}
-        selected={period}
-        onSelect={(key) => setPeriod(key as Period)}
+        value={period}
+        onChange={setPeriod}
       />
+
+      <ThemedView card style={styles.summary}>
+        <View>
+          <ThemedText type="caption">{t.spent[period]}</ThemedText>
+          <Text style={[styles.big, { color: theme.text }]}>{data ? money(spent.toString()) : '—'}</Text>
+        </View>
+        <View style={styles.right}>
+          <ThemedText type="caption">{t.left}</ThemedText>
+          <Text style={[styles.big, { color: theme.primaryInk }]}>{data ? money(data.remainingToday) : '—'}</Text>
+        </View>
+      </ThemedView>
+
+      {wallets.length > 1 && (
+        <FilterChips
+          label={t.wallet}
+          options={wallets.map((w) => ({ value: w.id, label: w.publicName ?? w.assetCode }))}
+          value={wallet?.id ?? ''}
+          onChange={setPicked}
+        />
+      )}
 
       <LoadState loading={loading} error={error} hasData={data !== undefined} onRetry={reload} />
       {data && sales.length === 0 && <ThemedText type="caption">{t.empty}</ThemedText>}
       {sales.map((sale) => (
-        <View key={sale.id} style={[styles.row, { borderBottomColor: theme.border }]}>
-          <Initials name={sale.vendorName ?? '?'} size={40} background={theme.vendorTint} color={theme.vendorInk} />
-          <View style={styles.info}>
-            <ThemedText style={styles.vendor}>{sale.vendorName ?? '—'}</ThemedText>
-            <ThemedText type="caption">
-              {[when(sale.createdAt, lang, t.today), paidWith(sale)].filter(Boolean).join(' · ')}
-            </ThemedText>
-            {sale.status === 'FAILED' && (
-              <ThemedText type="caption" style={{ color: theme.badInk }}>
-                {refusal(sale)}
-              </ThemedText>
-            )}
-          </View>
-          <View style={styles.amountBox}>
-            {/* A refused charge moved no money, so it carries no minus. */}
-            <Text style={[styles.amount, { color: theme.text }]}>
-              {sale.status === 'FAILED' ? '' : '−'}
-              {buyerAmount(sale, lang)}
-            </Text>
-            <StatusPill tone={STATUS_TONE[sale.status]} label={t.status[sale.status] ?? sale.status} />
-          </View>
-        </View>
+        <SaleLine key={sale.id} sale={sale} />
       ))}
-
-      <ThemedText type="caption">{t.which}</ThemedText>
-      <View style={styles.live}>
-        <View style={styles.liveDot} />
-        <ThemedText type="caption">{t.live}</ThemedText>
-      </View>
     </Screen>
   );
 }
 
-type ChipsProps = { label: string; options: { key: string; text: string }[]; selected: string | null; onSelect: (key: string) => void };
-
-function Chips({ label, options, selected, onSelect }: ChipsProps) {
+// A compact row: who, when, and the amount on the right. Paid money leaves the wallet, so it is "−" in red; a refused
+// charge is struck through in grey and says why under the row; one in progress says so. No "Pagado" label.
+function SaleLine({ sale }: { sale: SaleView }) {
   const theme = useTheme();
+  const t = useCopy(copy);
+  const lang = useLang();
+  const refusal = useRefusalText();
+  const paid = sale.status === 'PAID';
+  const refused = sale.status === 'FAILED';
   return (
-    <View accessibilityRole="radiogroup" accessibilityLabel={label} style={styles.chips}>
-      {options.map(({ key, text }) => {
-        const on = key === selected;
-        return (
-          <Pressable
-            key={key}
-            accessibilityRole="radio"
-            accessibilityState={{ checked: on }}
-            onPress={() => onSelect(key)}
+    <View style={[styles.row, { borderBottomColor: theme.border }]}>
+      <View style={styles.main}>
+        <Initials name={sale.vendorName ?? '?'} size={40} background={theme.accentTint} color={theme.accentInk} />
+        <View style={styles.info}>
+          <ThemedText numberOfLines={1} style={styles.vendor}>
+            {sale.vendorName ?? '—'}
+          </ThemedText>
+          <ThemedText type="caption">{when(sale.createdAt, lang)}</ThemedText>
+        </View>
+        <View style={styles.amountBox}>
+          <Text
             style={[
-              styles.chip,
-              on ? { backgroundColor: theme.text, borderColor: theme.text } : { backgroundColor: 'transparent', borderColor: theme.border },
+              styles.amount,
+              paid
+                ? { color: theme.outflow }
+                : refused
+                  ? { color: theme.refused, textDecorationLine: 'line-through' }
+                  : { color: theme.text },
             ]}>
-            <Text style={[styles.chipText, { color: on ? theme.background : theme.text }]}>{text}</Text>
-          </Pressable>
-        );
-      })}
+            {paid ? '−' : ''}
+            {buyerAmount(sale, lang)}
+          </Text>
+          {sale.status === 'CHARGING' && <Text style={[styles.note, { color: theme.accentInk }]}>{t.charging}</Text>}
+        </View>
+      </View>
+      {refused && (
+        <Text style={[styles.note, styles.reason, { color: theme.refused }]} numberOfLines={2}>
+          {t.refused(refusal(sale))}
+        </Text>
+      )}
     </View>
   );
 }
 
-// "Hoy · 15:04" for today, "16 oct · 15:04" before that, in the phone's time zone.
-function when(iso: string, lang: Lang, todayLabel: string) {
+// "7:24 p. m." today, "16 oct · 7:24 p. m." before that, in the phone's time zone.
+function when(iso: string, lang: Lang) {
   const date = new Date(iso);
   const locale = lang === 'es' ? 'es-CO' : 'en-US';
-  const time = date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
-  const day =
-    date.toDateString() === new Date().toDateString()
-      ? todayLabel
-      : date.toLocaleDateString(locale, { day: 'numeric', month: 'short' });
-  return `${day} · ${time}`;
+  const time = date.toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' });
+  if (date.toDateString() === new Date().toDateString()) return time;
+  return `${date.toLocaleDateString(locale, { day: 'numeric', month: 'short' })} · ${time}`;
 }
 
 const styles = StyleSheet.create({
-  left: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderRadius: 16, paddingVertical: 14, paddingHorizontal: 16 },
-  leftLabel: { fontWeight: '600' },
-  leftAmount: { fontSize: 22, fontWeight: '800' },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { minHeight: 44, justifyContent: 'center', borderWidth: 2, borderRadius: 999, paddingHorizontal: 16 },
-  chipText: { fontSize: 14, fontWeight: '700' },
-  row: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 12, borderBottomWidth: 1, paddingVertical: 8 },
+  summary: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', paddingVertical: 14 },
+  right: { alignItems: 'flex-end' },
+  big: { fontSize: 24, lineHeight: 30, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  row: { borderBottomWidth: 1, paddingVertical: 10, gap: 4 },
+  main: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 12 },
   info: { flex: 1, gap: 2 },
-  vendor: { fontSize: 16, fontWeight: '700' },
-  amountBox: { alignItems: 'flex-end', gap: 4 },
-  amount: { fontSize: 16, fontWeight: '800' },
-  live: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: Brand.buyer },
+  vendor: { fontSize: 16, fontWeight: '600' },
+  amountBox: { alignItems: 'flex-end', gap: 2 },
+  amount: { fontSize: 16, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  note: { fontSize: 13, lineHeight: 18, fontWeight: '600' },
+  reason: { marginLeft: 52 },
 });

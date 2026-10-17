@@ -23,6 +23,10 @@ const POLL_MS = 1000;
 const MAX_POLLS = 30;
 // The charge blocks up to CHARGE_POLL_SECONDS plus wallet latency (SDD §9).
 const CHARGE_TIMEOUT_MS = 30_000;
+// A sale left not confirmed is re-read this often until it settles (design: "Seguimos revisando solos").
+const RECHECK_MS = 3000;
+// charge() starts from the keypad, or again from a settled sale ("Intentar de nuevo" skips the keypad).
+const RESTARTABLE: SaleState[] = ['idle', 'failed', 'not_confirmed'];
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const toApiError = (e: unknown) => (e instanceof ApiError ? e : new ApiError('UNKNOWN', String(e), 0));
@@ -50,6 +54,8 @@ export function useSale(vendorId: string, { simulate }: { simulate: boolean }) {
     (sale: SaleView) => {
       if (sale.status === 'PAID') go('paid', { sale });
       else if (sale.status === 'FAILED') go('failed', { sale, failure: null });
+      // Still AWAITING_TAP after a lost charge call: it never ran, and the failure kept from that call says why.
+      else if (sale.status === 'AWAITING_TAP') go('failed', { sale });
       else go('not_confirmed', { sale });
     },
     [go],
@@ -73,6 +79,19 @@ export function useSale(vendorId: string, { simulate }: { simulate: boolean }) {
     },
     [finish, go],
   );
+
+  // GET /sales/:id once more from not_confirmed ("Revisar ahora" and the timer below); a newer sale discards it.
+  const recheck = useCallback(async () => {
+    const sale = saleRef.current;
+    const run = runRef.current;
+    if (!sale || stateRef.current !== 'not_confirmed' || startingRef.current) return;
+    try {
+      const fresh = await api<SaleView>(`/sales/${sale.id}`);
+      if (runRef.current === run && stateRef.current === 'not_confirmed' && !startingRef.current) finish(fresh);
+    } catch {
+      // still unreachable: the next tick tries again
+    }
+  }, [finish]);
 
   const tap = useCallback(
     async (walletAddress: string) => {
@@ -123,12 +142,14 @@ export function useSale(vendorId: string, { simulate }: { simulate: boolean }) {
 
   const charge = useCallback(
     async (amount: string) => {
-      if (stateRef.current !== 'idle' || startingRef.current) return;
+      if (!RESTARTABLE.includes(stateRef.current) || startingRef.current) return;
+      // RESET drops the settled sale a retry starts from, so its refusal never shows next to the new failure.
+      const fail = (failure: AppFailure) => go('failed', { ...RESET, failure });
       if (NfcTap) {
-        if (!NfcTap.isSupported()) return go('failed', { failure: { code: 'NO_NFC' } });
-        if (!NfcTap.isEnabled()) return go('failed', { failure: { code: 'NFC_OFF' } });
+        if (!NfcTap.isSupported()) return fail({ code: 'NO_NFC' });
+        if (!NfcTap.isEnabled()) return fail({ code: 'NFC_OFF' });
       } else if (!simulate) {
-        return go('failed', { failure: { code: 'NO_NFC_MODULE' } });
+        return fail({ code: 'NO_NFC_MODULE' });
       }
       const run = ++runRef.current;
       startingRef.current = true;
@@ -140,7 +161,7 @@ export function useSale(vendorId: string, { simulate }: { simulate: boolean }) {
         NfcTap?.startReader();
         go('awaiting_tap', { ...RESET, sale });
       } catch (e) {
-        if (runRef.current === run) go('failed', { failure: { code: 'API', error: toApiError(e) } });
+        if (runRef.current === run) fail({ code: 'API', error: toApiError(e) });
       } finally {
         startingRef.current = false;
         setStarting(false);
@@ -172,6 +193,12 @@ export function useSale(vendorId: string, { simulate }: { simulate: boolean }) {
     };
   }, [go, tap]);
 
+  useEffect(() => {
+    if (snap.state !== 'not_confirmed') return;
+    const timer = setInterval(recheck, RECHECK_MS);
+    return () => clearInterval(timer);
+  }, [snap.state, recheck]);
+
   useEffect(
     () => () => {
       runRef.current++;
@@ -179,5 +206,5 @@ export function useSale(vendorId: string, { simulate }: { simulate: boolean }) {
     [],
   );
 
-  return { ...snap, starting, charge, tap, reset };
+  return { ...snap, starting, charge, tap, reset, recheck };
 }

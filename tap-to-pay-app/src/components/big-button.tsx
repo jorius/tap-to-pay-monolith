@@ -20,6 +20,6 @@ export function BigButton({ label, color, ghost = false, disabled = false, onPre
 }
 
 const styles = StyleSheet.create({
-  button: { minHeight: 64, borderRadius: 16, paddingHorizontal: 24, alignItems: 'center', justifyContent: 'center' },
-  label: { fontSize: 20, fontWeight: '700' },
+  button: { minHeight: 56, borderRadius: 14, paddingHorizontal: 24, alignItems: 'center', justifyContent: 'center' },
+  label: { fontSize: 18, fontWeight: '600' },
 });

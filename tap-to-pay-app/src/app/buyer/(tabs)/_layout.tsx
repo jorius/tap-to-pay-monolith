@@ -9,16 +9,15 @@ import { commonCopy } from '@/i18n/common';
 export default function BuyerTabs() {
   const { buyerId } = useSession();
   const t = useCopy(commonCopy);
-  if (!buyerId) return <Redirect href="/buyer" />;
+  if (!buyerId) return <Redirect href="/" />;
   return (
     <>
       <RoleTabs
         role="buyer"
         tabs={[
-          { name: 'card', title: t.tabs.card, icon: 'credit-card-outline' },
-          { name: 'wallets', title: t.tabs.wallets, icon: 'wallet-outline' },
-          { name: 'history', title: t.tabs.history, icon: 'clock-outline' },
-          { name: 'settings', title: t.tabs.settings, icon: 'tune-variant' },
+          { name: 'card', title: t.tabs.pay, icon: 'credit-card-outline' },
+          { name: 'history', title: t.tabs.movements, icon: 'format-list-bulleted' },
+          { name: 'account', title: t.tabs.account, icon: 'account-outline' },
         ]}
       />
       {/* Over every tab, so a tap's outcome shows wherever the buyer is. */}

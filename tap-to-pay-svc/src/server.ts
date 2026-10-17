@@ -29,6 +29,7 @@ const deps: Deps = {
   timeZone: cfg.DAILY_LIMIT_TZ,
   pollSeconds: cfg.CHARGE_POLL_SECONDS,
   defaultLimits: { perPaymentLimit: BigInt(cfg.SEED_PER_PAYMENT_LIMIT), dailyLimit: BigInt(cfg.SEED_DAILY_LIMIT) },
+  pendingGrants: new Map(),
 };
 const app = createApp(deps, { clientWalletAddress: cfg.OP_CLIENT_WALLET_ADDRESS });
 

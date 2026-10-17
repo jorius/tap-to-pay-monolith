@@ -122,6 +122,8 @@ export interface Repo {
   setDefaultWallet(buyerId: string, walletId: string): Promise<void>;
   updateWalletLimits(walletId: string, limits: Limits): Promise<BuyerWalletRow>;
   updateWalletGrant(walletId: string, grant: GrantTokens): Promise<BuyerWalletRow>;
+  /** Forgets the wallet's grant: token, manage URL and authorized daily limit. */
+  clearWalletGrant(walletId: string): Promise<void>;
   updateWalletPublicName(walletId: string, publicName: string | null): Promise<void>;
   /** Its sales keep their buyer and lose the wallet link. */
   deleteWallet(walletId: string): Promise<void>;
@@ -232,6 +234,13 @@ export class PrismaRepo implements Repo {
 
   updateWalletGrant(walletId: string, grant: GrantTokens) {
     return this.db.buyerWallet.update({ where: { id: walletId }, data: grant });
+  }
+
+  async clearWalletGrant(walletId: string) {
+    await this.db.buyerWallet.update({
+      where: { id: walletId },
+      data: { grantAccessToken: null, grantManageUrl: null, grantDailyLimit: null },
+    });
   }
 
   async updateWalletPublicName(walletId: string, publicName: string | null) {

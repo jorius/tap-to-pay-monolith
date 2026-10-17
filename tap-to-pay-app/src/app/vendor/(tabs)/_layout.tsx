@@ -20,16 +20,14 @@ export default function VendorTabs() {
     return () => NfcTap?.stopReader();
   }, [vendorId]);
 
-  if (!vendorId) return <Redirect href="/vendor" />;
+  if (!vendorId) return <Redirect href="/" />;
   return (
     <RoleTabs
       role="vendor"
       tabs={[
         { name: 'sale', title: t.tabs.sale, icon: 'contactless-payment' },
-        { name: 'dashboard', title: t.tabs.dashboard, icon: 'chart-bar' },
-        { name: 'transactions', title: t.tabs.transactions, icon: 'format-list-bulleted' },
-        { name: 'wallet', title: t.tabs.wallet, icon: 'wallet-outline' },
-        { name: 'settings', title: t.tabs.settings, icon: 'tune-variant' },
+        { name: 'sales', title: t.tabs.sales, icon: 'chart-bar' },
+        { name: 'more', title: t.tabs.more, icon: 'dots-horizontal' },
       ]}
     />
   );

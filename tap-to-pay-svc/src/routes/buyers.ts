@@ -2,10 +2,13 @@ import { Router } from 'express';
 import { z } from 'zod';
 import {
   addWallet,
+  finishWalletGrant,
   getBuyer,
   listBuyerSales,
   listBuyerViews,
   removeWallet,
+  requestWalletGrant,
+  revokeWalletGrant,
   setDefaultWallet,
   updateLimits,
   updateWalletLimits,
@@ -13,6 +16,8 @@ import {
 import type { Deps } from '../services/sales.js';
 
 const limitsBody = z.object({ perPaymentLimit: z.string(), dailyLimit: z.string() });
+const grantBody = z.object({ finishUri: z.string().min(1), amount: z.string().optional() });
+const grantFinishBody = z.object({ interactRef: z.string().min(1), hash: z.string().min(1) });
 const walletBody = z.object({ walletAddress: z.string().url() });
 const defaultWalletBody = z.object({ walletId: z.string().min(1) });
 const salesQuery = z.object({
@@ -50,6 +55,21 @@ export function buyersRouter(deps: Deps): Router {
   router.patch('/buyers/:id/wallets/:walletId/limits', async (req, res) => {
     const body = limitsBody.parse(req.body);
     res.json({ data: await updateWalletLimits(deps, req.params.id, req.params.walletId, body), error: null });
+  });
+
+  // The app's authorization screen: start the wallet's grant, then relay the wallet's finish redirect.
+  router.post('/buyers/:id/wallets/:walletId/grant', async (req, res) => {
+    const body = grantBody.parse(req.body);
+    res.json({ data: await requestWalletGrant(deps, req.params.id, req.params.walletId, body), error: null });
+  });
+
+  router.post('/buyers/:id/wallets/:walletId/grant/finish', async (req, res) => {
+    const body = grantFinishBody.parse(req.body);
+    res.json({ data: await finishWalletGrant(deps, req.params.id, req.params.walletId, body), error: null });
+  });
+
+  router.delete('/buyers/:id/wallets/:walletId/grant', async (req, res) => {
+    res.json({ data: await revokeWalletGrant(deps, req.params.id, req.params.walletId), error: null });
   });
 
   router.delete('/buyers/:id/wallets/:walletId', async (req, res) => {

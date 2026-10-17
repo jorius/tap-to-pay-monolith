@@ -2,9 +2,32 @@ import { api } from '@/api/client';
 import type { BuyerView, BuyerWalletView } from '@/api/types';
 import { useApi } from '@/hooks/use-api';
 import { useSession } from '@/hooks/use-session';
+import type { Lang } from '@/i18n';
 import { NfcTap } from '@/nfc/nfc-tap';
 
 type Limits = { perPaymentLimit: string; dailyLimit: string };
+
+// What stops this phone from paying as a card, checked in this order (Inicio's switch and Activar pagos share it);
+// null when nothing does. It reads the phone's NFC state, so callers re-run it on focus instead of memoizing it.
+export type CardBlocker = 'module' | 'nfc' | 'nfcOff' | 'hce' | 'grant';
+
+export function cardBlocker(defaultWallet: BuyerWalletView | null): CardBlocker | null {
+  if (!NfcTap) return 'module';
+  if (!NfcTap.isSupported()) return 'nfc';
+  if (!NfcTap.isEnabled()) return 'nfcOff';
+  if (!NfcTap.isHceSupported()) return 'hce';
+  return defaultWallet?.hasGrant ? null : 'grant';
+}
+
+const CURRENCIES: Record<string, Record<Lang, string>> = {
+  COP: { es: 'Pesos colombianos', en: 'Colombian pesos' },
+  USD: { es: 'Dólares', en: 'US dollars' },
+  EUR: { es: 'Euros', en: 'Euros' },
+  MXN: { es: 'Pesos mexicanos', en: 'Mexican pesos' },
+};
+
+// The currency's name on the card face and the activation checklist; other assets keep their code.
+export const currencyName = (code: string, lang: Lang) => CURRENCIES[code]?.[lang] ?? code;
 
 // shortcut: a service without multi-wallet support sends no `wallets`; its single wallet stands in as the only card.
 // Delete once every running service answers with wallets.

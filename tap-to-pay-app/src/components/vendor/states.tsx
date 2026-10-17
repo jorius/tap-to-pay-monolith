@@ -7,14 +7,14 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { vendorCopy } from '@/components/vendor/copy';
 import { errorText } from '@/components/vendor/format';
-import { Brand, Fill } from '@/constants/theme';
+import { Brand, Fills } from '@/constants/theme';
 import { useCopy } from '@/i18n';
 
 export function LoadingState() {
   const t = useCopy(vendorCopy);
   return (
     <View style={styles.center}>
-      <ActivityIndicator size="large" color={Brand.vendor} accessibilityLabel={t.loading} />
+      <ActivityIndicator size="large" color={Brand.teal} accessibilityLabel={t.loading} />
     </View>
   );
 }
@@ -25,7 +25,7 @@ export function ErrorState({ error, onRetry }: { error: ApiError; onRetry: () =>
     <ThemedView card accessibilityRole="alert">
       <StatusPill tone="bad" label={error.code} />
       <ThemedText>{errorText(error, t.network)}</ThemedText>
-      <BigButton label={t.retry} color={Fill.vendor} onPress={onRetry} />
+      <BigButton label={t.retry} color={Fills.primary} onPress={onRetry} />
     </ThemedView>
   );
 }

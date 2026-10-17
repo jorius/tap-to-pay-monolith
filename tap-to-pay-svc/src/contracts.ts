@@ -21,6 +21,9 @@ export type HttpErrorCode =
   | 'LAST_WALLET'
   | 'SALE_NOT_FOUND'
   | 'SALE_NOT_CHARGEABLE'
+  | 'GRANT_FAILED'
+  | 'GRANT_NOT_PENDING'
+  | 'GRANT_HASH_MISMATCH'
   | 'INTERNAL';
 
 export type SaleView = {
@@ -33,6 +36,11 @@ export type SaleView = {
   buyerId: string | null;
   /** The buyer's wallet that paid or was refused; null for BUYER_UNKNOWN refusals and once that wallet is removed. */
   buyerWalletId: string | null;
+  /**
+   * On POST /sales/:id/charge, GET /sales/:id and the vendor's list: the paying wallet's publicName, else the buyer's
+   * registered name; null while no buyer is known (BUYER_UNKNOWN refusals).
+   */
+  buyerName?: string | null;
   amount: string;
   amountFormatted: string;
   assetCode: string;
@@ -102,6 +110,9 @@ export type VendorView = Omit<VendorWalletView, 'id' | 'isDefault'> & {
 };
 
 export type BuyerSales = { remainingToday: string; sales: SaleView[] };
+
+/** POST /buyers/:id/wallets/:walletId/grant: where the buyer consents in their wallet. */
+export type GrantStart = { redirectUrl: string };
 
 export type Health = { ok: boolean; clientWalletAddress: string };
 

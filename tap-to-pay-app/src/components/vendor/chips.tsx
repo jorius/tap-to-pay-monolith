@@ -7,13 +7,18 @@ type Props<T extends string> = {
   options: { value: T; label: string }[];
   value: T;
   onChange: (value: T) => void;
+  // A segmented control (Hoy · Semana · Mes): equal-width options in one track, the chosen one raised in white.
+  segmented?: boolean;
 };
 
-// Single-choice pills (design: Hoy · Semana · Mes, and the status filters).
-export function FilterChips<T extends string>({ label, options, value, onChange }: Props<T>) {
+// Single-choice pills (design: the status filters), or a segmented control with `segmented`.
+export function FilterChips<T extends string>({ label, options, value, onChange, segmented = false }: Props<T>) {
   const theme = useTheme();
   return (
-    <View accessibilityRole="radiogroup" accessibilityLabel={label} style={styles.row}>
+    <View
+      accessibilityRole="radiogroup"
+      accessibilityLabel={label}
+      style={segmented ? [styles.track, { backgroundColor: theme.border }] : styles.row}>
       {options.map((option) => {
         const on = option.value === value;
         return (
@@ -23,8 +28,17 @@ export function FilterChips<T extends string>({ label, options, value, onChange 
             accessibilityState={{ checked: on }}
             hitSlop={4}
             onPress={() => onChange(option.value)}
-            style={[styles.chip, { borderColor: on ? theme.text : theme.border, backgroundColor: on ? theme.text : 'transparent' }]}>
-            <Text style={[styles.label, { color: on ? theme.background : theme.text, fontWeight: on ? '700' : '600' }]}>
+            style={
+              segmented
+                ? [styles.segment, on && { backgroundColor: theme.surface }]
+                : [
+                    styles.chip,
+                    on
+                      ? { borderColor: theme.primaryInk, backgroundColor: theme.primaryTint }
+                      : { borderColor: theme.border, backgroundColor: theme.surface },
+                  ]
+            }>
+            <Text style={[styles.label, { color: on ? (segmented ? theme.text : theme.primaryInk) : segmented ? theme.muted : theme.text }]}>
               {option.label}
             </Text>
           </Pressable>
@@ -36,6 +50,8 @@ export function FilterChips<T extends string>({ label, options, value, onChange 
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 16, borderRadius: 999, borderWidth: 2 },
-  label: { fontSize: 14 },
+  chip: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 16, borderRadius: 999, borderWidth: 1 },
+  track: { flexDirection: 'row', padding: 4, borderRadius: 14 },
+  segment: { flex: 1, minHeight: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 10 },
+  label: { fontSize: 14, fontWeight: '600' },
 });

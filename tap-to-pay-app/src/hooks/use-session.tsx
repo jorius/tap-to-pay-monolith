@@ -14,10 +14,13 @@ export type Session = {
   buyerId: string | null;
   debugLabels: boolean;
   theme: ThemeChoice;
+  // Received payments are announced aloud on the vendor phone (design: Cobrar speaker, Ajustes › sonido).
+  sound: boolean;
 };
 
 // The design keeps these on the phone (welcome once, who this phone is, language, debug labels, theme); SDD decision 8
 // kept nothing. Spanish stays the default whatever the system language.
+// The key keeps the old product name, so sessions saved before the Paynela rename survive.
 const KEY = 'tap-to-pay/session';
 const DEFAULTS: Session = {
   lang: 'es',
@@ -26,6 +29,7 @@ const DEFAULTS: Session = {
   buyerId: null,
   debugLabels: true,
   theme: 'system',
+  sound: true,
 };
 
 // A session saved while cards were separate buyers kept buyerIds; its first one is this phone's buyer.

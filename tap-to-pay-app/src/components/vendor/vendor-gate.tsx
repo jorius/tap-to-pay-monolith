@@ -7,7 +7,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { vendorCopy } from '@/components/vendor/copy';
 import { ErrorState, LoadingState } from '@/components/vendor/states';
-import { Fill } from '@/constants/theme';
+import { Fills } from '@/constants/theme';
 import { useApi } from '@/hooks/use-api';
 import { useSession } from '@/hooks/use-session';
 import { useCopy } from '@/i18n';
@@ -31,7 +31,7 @@ export function VendorGate({ children }: { children: (vendor: VendorView, replac
       {data ? (
         <ThemedView card>
           <ThemedText>{t.missing}</ThemedText>
-          <BigButton label={t.pickAgain} color={Fill.vendor} onPress={() => update({ vendorId: null })} />
+          <BigButton label={t.pickAgain} color={Fills.primary} onPress={() => update({ vendorId: null })} />
         </ThemedView>
       ) : error ? (
         <ErrorState error={error} onRetry={reload} />

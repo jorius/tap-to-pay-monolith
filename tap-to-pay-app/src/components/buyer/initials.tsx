@@ -14,12 +14,12 @@ export function Initials({ name, size, background, color }: Props) {
     <View
       importantForAccessibility="no-hide-descendants"
       style={[styles.circle, { width: size, height: size, borderRadius: size / 2, backgroundColor: background }]}>
-      <Text style={[styles.text, { color }]}>{letters}</Text>
+      <Text style={[styles.text, { color, fontSize: Math.round(size * 0.38) }]}>{letters}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   circle: { alignItems: 'center', justifyContent: 'center' },
-  text: { fontSize: 15, fontWeight: '800' },
+  text: { fontWeight: '600' },
 });

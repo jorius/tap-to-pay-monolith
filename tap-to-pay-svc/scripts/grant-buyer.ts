@@ -1,19 +1,17 @@
 import 'dotenv/config';
-import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 import { parseArgs } from 'node:util';
-import { isFinalizedGrantWithAccessToken, isPendingGrant } from '@interledger/open-payments';
 import { loadConfig } from '../src/config.js';
 import { createPrisma } from '../src/db/prisma.js';
 import { PrismaRepo } from '../src/db/repos.js';
-import { createSdkClient } from '../src/open-payments/client.js';
-import { expectedInteractionHashes, verifyInteractionHash } from '../src/open-payments/hash.js';
+import { createOpenPayments } from '../src/open-payments/client.js';
 import { grantTarget } from '../src/services/buyers.js';
-import { dayRange } from '../src/services/limits.js';
+import { finishGrant, InteractionHashError, startGrant } from '../src/services/grants.js';
 import { formatAmount, parseAmount } from '../src/services/money.js';
 
 // The one-time interactive outgoing-payment grant for ONE wallet (SDD section 10, step 3), capped per day by the
-// wallet itself: --wallet, else the wallet --buyer names, else the buyer's default wallet.
+// wallet itself: --wallet, else the wallet --buyer names, else the buyer's default wallet. The app's authorization
+// screen runs the same steps (src/services/grants.ts) with its own finish redirect.
 // Usage: npm run grant:buyer -- --buyer <id|name|walletAddress> [--wallet <url>] [--amount <digits per day>]
 
 const FINISH_PORT = 4100;
@@ -39,45 +37,25 @@ try {
     wallet: values.wallet,
   });
 
-  const client = await createSdkClient({
+  const op = await createOpenPayments({
     walletAddressUrl: cfg.OP_CLIENT_WALLET_ADDRESS,
     keyId: cfg.OP_KEY_ID,
     privateKeyPath: cfg.OP_PRIVATE_KEY_PATH,
   });
-  const wallet = await client.walletAddress.get({ url: buyerWallet.walletAddress });
-  const clientNonce = randomBytes(16).toString('hex');
 
   // The wallet enforces this per local day, starting at today's local midnight like the service's daily cap.
   const dailyDebit = values.amount ? parseAmount(values.amount) : buyerWallet.dailyLimit;
-  const authorized = `${formatAmount(dailyDebit, wallet.assetScale)} ${wallet.assetCode}`;
-  const intervalStart = dayRange(new Date(), cfg.DAILY_LIMIT_TZ).start.toISOString();
-  const grant = await client.grant.request(
-    { url: wallet.authServer },
-    {
-      access_token: {
-        access: [
-          {
-            type: 'outgoing-payment',
-            actions: ['create', 'read'],
-            identifier: wallet.id,
-            limits: {
-              debitAmount: { value: dailyDebit.toString(), assetCode: wallet.assetCode, assetScale: wallet.assetScale },
-              interval: `R/${intervalStart}/P1D`,
-            },
-          },
-        ],
-      },
-      interact: {
-        start: ['redirect'],
-        finish: { method: 'redirect', uri: FINISH_URI, nonce: clientNonce },
-      },
-    },
-  );
-  if (!isPendingGrant(grant)) throw new Error('Expected an interactive grant, got a finalized one');
+  const { info, grant } = await startGrant(op, buyerWallet, {
+    dailyDebit,
+    finishUri: FINISH_URI,
+    now: new Date(),
+    timeZone: cfg.DAILY_LIMIT_TZ,
+  });
+  const authorized = `${formatAmount(dailyDebit, info.assetScale)} ${info.assetCode}`;
 
   const finished = waitForFinish();
   console.log(
-    `\nOpen this URL, log in as ${buyer.name} (${buyerWallet.walletAddress}) and click Accept (up to ${authorized} per day):\n\n  ${grant.interact.redirect}\n`,
+    `\nOpen this URL, log in as ${buyer.name} (${buyerWallet.walletAddress}) and click Accept (up to ${authorized} per day):\n\n  ${grant.redirect}\n`,
   );
   const params = await finished;
 
@@ -86,30 +64,16 @@ try {
   const hash = params.get('hash');
   if (!interactRef || !hash) throw new Error('The finish redirect carried no interact_ref or hash');
 
-  const hashInput = {
-    clientNonce,
-    interactNonce: grant.interact.finish,
-    interactRef,
-    authServer: wallet.authServer,
-  };
-  if (!verifyInteractionHash({ ...hashInput, hash })) {
-    console.error(`Interaction hash did not verify.\n  received: ${hash}`);
-    for (const digest of expectedInteractionHashes(hashInput)) console.error(`  expected: ${digest}`);
-    process.exitCode = 1;
-  } else {
-    const continued = await client.grant.continue(
-      { url: grant.continue.uri, accessToken: grant.continue.access_token.value },
-      { interact_ref: interactRef },
-    );
-    if (!isFinalizedGrantWithAccessToken(continued)) throw new Error('The grant did not finalize with a token');
-    await repo.updateWalletGrant(buyerWallet.id, {
-      grantAccessToken: continued.access_token.value,
-      grantManageUrl: continued.access_token.manage,
-      grantDailyLimit: dailyDebit,
-    });
+  try {
+    await finishGrant({ repo, op }, grant, { interactRef, hash });
     console.log(
       `Grant stored for ${buyer.name}'s ${buyerWallet.walletAddress}: up to ${authorized} per day. Every tap from it is now silent.`,
     );
+  } catch (err) {
+    if (!(err instanceof InteractionHashError)) throw err;
+    console.error(`Interaction hash did not verify.\n  received: ${err.received}`);
+    for (const digest of err.expected) console.error(`  expected: ${digest}`);
+    process.exitCode = 1;
   }
 } catch (err) {
   console.error(err instanceof Error ? err.message : err);

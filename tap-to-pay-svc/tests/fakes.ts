@@ -18,7 +18,14 @@ import type {
 import type { DayRange } from '../src/services/limits.js';
 import type { Amount } from '../src/services/money.js';
 import type { Deps } from '../src/services/sales.js';
-import type { OpenPayments, Quote, RotatedToken, WalletInfo } from '../src/open-payments/types.js';
+import type {
+  OpenPayments,
+  OutgoingGrantRequest,
+  PendingGrant,
+  Quote,
+  RotatedToken,
+  WalletInfo,
+} from '../src/open-payments/types.js';
 
 /** Pinned so fixture sales always fall inside the same Bogotá day, whatever the real date. */
 export const NOW = new Date('2026-10-14T15:00:00Z');
@@ -195,6 +202,9 @@ export class FakeRepo implements Repo {
   async updateWalletGrant(walletId: string, grant: GrantTokens) {
     return Object.assign(this.mustWallet(walletId), grant);
   }
+  async clearWalletGrant(walletId: string) {
+    Object.assign(this.mustWallet(walletId), { grantAccessToken: null, grantManageUrl: null, grantDailyLimit: null });
+  }
   async updateWalletPublicName(walletId: string, publicName: string | null) {
     this.mustWallet(walletId).publicName = publicName;
   }
@@ -305,8 +315,8 @@ type Script = {
   /** Thrown by the next outgoing payment calls, in order. */
   outgoingFailures: Error[];
   rotateFails: boolean;
-  /** Thrown by a step before the outgoing payment. */
-  failOn: Partial<Record<'wallet' | 'incoming' | 'quote', Error>>;
+  /** Thrown by a step before the outgoing payment, or by a grant request, continue or revoke. */
+  failOn: Partial<Record<'wallet' | 'incoming' | 'quote' | 'grant' | 'continue' | 'revoke', Error>>;
 };
 
 /** Records every call as a string and is scripted per test. */
@@ -382,6 +392,29 @@ export class FakeOpenPayments implements OpenPayments {
       completed: this.script.completed,
     };
   }
+
+  async requestOutgoingPaymentGrant(wallet: WalletInfo, request: OutgoingGrantRequest): Promise<PendingGrant> {
+    this.calls.push(`grant:${wallet.id}:${request.dailyDebit}:${request.intervalStart}:${request.finishUri}`);
+    if (this.script.failOn.grant) throw this.script.failOn.grant;
+    const n = ++this.seq;
+    return {
+      redirect: `${wallet.authServer}/interact/${n}`,
+      interactNonce: `interact-nonce-${n}`,
+      continueUri: `${wallet.authServer}/continue/${n}`,
+      continueToken: `continue-token-${n}`,
+    };
+  }
+
+  async continueGrant(pending: Pick<PendingGrant, 'continueUri' | 'continueToken'>, interactRef: string) {
+    this.calls.push(`continue:${pending.continueToken}:${interactRef}`);
+    if (this.script.failOn.continue) throw this.script.failOn.continue;
+    return { value: 'granted-token', manage: 'https://auth.test/token/granted' };
+  }
+
+  async revokeToken(manageUrl: string, accessToken: string) {
+    this.calls.push(`revoke:${manageUrl}:${accessToken}`);
+    if (this.script.failOn.revoke) throw this.script.failOn.revoke;
+  }
 }
 
 export function makeDeps(overrides: Partial<Deps> = {}) {
@@ -395,6 +428,7 @@ export function makeDeps(overrides: Partial<Deps> = {}) {
     timeZone: 'America/Bogota',
     pollSeconds: 8,
     defaultLimits: { perPaymentLimit: 2000n, dailyLimit: 5000n },
+    pendingGrants: new Map(),
     ...overrides,
   };
   return { deps, repo, op };

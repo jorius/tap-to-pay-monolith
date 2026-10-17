@@ -7,7 +7,7 @@ import { StatusPill } from '@/components/status-pill';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { ErrorState, LoadingState } from '@/components/vendor/states';
-import { Brand, Fill } from '@/constants/theme';
+import { Brand } from '@/constants/theme';
 import { useApi } from '@/hooks/use-api';
 import { useTheme } from '@/hooks/use-theme';
 import { defineCopy, useCopy } from '@/i18n';
@@ -39,11 +39,11 @@ export function SimulateTap({ onTap }: { onTap: (walletAddress: string) => void 
   const buyers = useApi<BuyerView[]>(open ? '/buyers' : null);
 
   return (
-    <ThemedView card style={[styles.box, { borderColor: Brand.service }]}>
+    <ThemedView card style={[styles.box, { borderColor: Brand.tealDark }]}>
       <ThemedText type="subtitle">{t.title}</ThemedText>
       <ThemedText type="caption">{t.note}</ThemedText>
       {!open ? (
-        <BigButton label={t.open} color={Fill.service} onPress={() => setOpen(true)} />
+        <BigButton label={t.open} color={Brand.tealDark} onPress={() => setOpen(true)} />
       ) : buyers.data ? (
         buyers.data.length === 0 ? (
           <ThemedText>{t.empty}</ThemedText>
@@ -76,6 +76,6 @@ const styles = StyleSheet.create({
   box: { borderWidth: 1, borderStyle: 'dashed' },
   buyer: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, borderWidth: 1, borderRadius: 14 },
   who: { flex: 1, flexDirection: 'row', alignItems: 'baseline', gap: 8 },
-  name: { fontSize: 16, fontWeight: '700' },
+  name: { fontSize: 16, fontWeight: '600' },
   asset: { fontSize: 13, fontWeight: '700' },
 });

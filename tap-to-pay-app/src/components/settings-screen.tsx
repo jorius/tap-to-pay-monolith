@@ -1,7 +1,7 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
-import type { ReactNode } from 'react';
+import { Children, Fragment, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 
 import { apiUrl } from '@/api/client';
@@ -9,7 +9,7 @@ import type { BuyerView, VendorView } from '@/api/types';
 import { Screen } from '@/components/screen';
 import { ThemedText } from '@/components/themed-text';
 import { appRole, type AppRole } from '@/config/role';
-import { Brand, roleColors } from '@/constants/theme';
+import { Fills } from '@/constants/theme';
 import { useApi } from '@/hooks/use-api';
 import { useHealth } from '@/hooks/use-health';
 import { useSession, type ThemeChoice } from '@/hooks/use-session';
@@ -19,17 +19,19 @@ import { defineCopy, useCopy, type Lang } from '@/i18n';
 const copy = defineCopy(
   {
     language: 'Idioma',
-    spanish: 'Español (predeterminado)',
+    langs: { es: 'Español', en: 'English' },
     langNote: 'La app abre en español aunque el teléfono esté en otro idioma. Tu elección se guarda en este teléfono.',
     theme: 'Tema',
-    themes: { system: 'Como el teléfono (predeterminado)', light: 'Claro', dark: 'Oscuro' },
+    themes: { system: 'Como el teléfono', light: 'Claro', dark: 'Oscuro' },
+    sound: 'Sonido',
+    announce: 'Anunciar pagos en voz alta',
     thisPhone: 'Este teléfono',
     who: { vendor: 'Comercio', buyer: 'Comprador' },
     change: 'Cambiar',
     wallets: (n: number) => (n === 1 ? '1 billetera' : `${n} billeteras`),
-    manage: 'Administrar',
     service: 'Servicio',
     apiUrl: 'URL de la API',
+    connection: 'Conexión',
     checking: 'Verificando…',
     connected: (ms: number) => `Conectado · ${ms} ms`,
     unreachable: 'Sin conexión',
@@ -42,17 +44,19 @@ const copy = defineCopy(
   },
   {
     language: 'Language',
-    spanish: 'Español (default)',
+    langs: { es: 'Español', en: 'English' },
     langNote: 'The app opens in Spanish even when the phone uses another language. Your choice is kept on this phone.',
     theme: 'Theme',
-    themes: { system: 'Same as the phone (default)', light: 'Light', dark: 'Dark' },
+    themes: { system: 'Same as the phone', light: 'Light', dark: 'Dark' },
+    sound: 'Sound',
+    announce: 'Announce payments out loud',
     thisPhone: 'This phone',
     who: { vendor: 'Vendor', buyer: 'Buyer' },
     change: 'Change',
     wallets: (n: number) => (n === 1 ? '1 wallet' : `${n} wallets`),
-    manage: 'Manage',
     service: 'Service',
     apiUrl: 'API URL',
+    connection: 'Connection',
     checking: 'Checking…',
     connected: (ms: number) => `Connected · ${ms} ms`,
     unreachable: 'Disconnected',
@@ -65,18 +69,13 @@ const copy = defineCopy(
   },
 );
 
-const LANGS: { lang: Lang; label: (t: (typeof copy)['es']) => string }[] = [
-  { lang: 'es', label: (t) => t.spanish },
-  { lang: 'en', label: () => 'English' },
-];
-
+const LANGS: Lang[] = ['es', 'en'];
 const THEMES: ThemeChoice[] = ['system', 'light', 'dark'];
 
-// Settings of both builds (design: Settings); the role picks colours and which identity "Este teléfono" shows.
+// Ajustes of both builds, a stack screen in the design's list style: white groups of rows with chevrons.
 export function SettingsScreen({ role }: { role: AppRole }) {
   const session = useSession();
   const theme = useTheme();
-  const colors = roleColors(theme, role);
   const t = useCopy(copy);
   const health = useHealth();
   const router = useRouter();
@@ -88,125 +87,90 @@ export function SettingsScreen({ role }: { role: AppRole }) {
   const version = Constants.expoConfig?.version ?? '';
   const connection =
     health.status === 'connected'
-      ? { label: t.connected(health.latencyMs), dot: Brand.ok, ink: theme.okInk }
+      ? { label: t.connected(health.latencyMs), dot: Fills.income, ink: theme.income }
       : health.status === 'checking'
-        ? { label: t.checking, dot: Brand.postgres, ink: theme.muted }
-        : { label: t.unreachable, dot: Brand.bad, ink: theme.badInk };
+        ? { label: t.checking, dot: Fills.refused, ink: theme.muted }
+        : { label: t.unreachable, dot: Fills.outflow, ink: theme.outflow };
+  const toggle = (label: string, value: boolean, onChange: (value: boolean) => void) => (
+    <Switch
+      accessibilityLabel={label}
+      value={value}
+      onValueChange={onChange}
+      trackColor={{ false: theme.idle, true: Fills.primary }}
+      thumbColor="#FFFFFF"
+    />
+  );
 
   return (
     <Screen onRefresh={() => Promise.all([vendors.reload(), buyer.reload()])}>
       <Section title={t.language}>
-        <Choices
-          label={t.language}
-          options={LANGS.map(({ lang, label }) => ({ value: lang, label: label(t) }))}
-          value={session.lang}
-          onChange={(lang) => session.update({ lang })}
-          ink={colors.ink}
-        />
+        <Group label={t.language}>
+          {LANGS.map((lang) => (
+            <Row key={lang} label={t.langs[lang]} checked={session.lang === lang} onPress={() => session.update({ lang })} />
+          ))}
+        </Group>
         <ThemedText type="caption">{t.langNote}</ThemedText>
       </Section>
 
       <Section title={t.theme}>
-        <Choices
-          label={t.theme}
-          options={THEMES.map((value) => ({ value, label: t.themes[value] }))}
-          value={session.theme}
-          onChange={(value) => session.update({ theme: value })}
-          ink={colors.ink}
-        />
+        <Group label={t.theme}>
+          {THEMES.map((value) => (
+            <Row key={value} label={t.themes[value]} checked={session.theme === value} onPress={() => session.update({ theme: value })} />
+          ))}
+        </Group>
       </Section>
 
+      {role === 'vendor' && (
+        <Section title={t.sound}>
+          <Group>
+            <Row label={t.announce} right={toggle(t.announce, session.sound, (sound) => session.update({ sound }))} />
+          </Group>
+        </Section>
+      )}
+
       <Section title={t.thisPhone}>
-        <View style={[styles.row, { backgroundColor: theme.card }]}>
-          <View style={styles.grow}>
-            <ThemedText type="caption">{t.who[role]}</ThemedText>
-            <ThemedText style={styles.strong}>{phone}</ThemedText>
-          </View>
-          {/* A buyer's wallets are added, removed and made default on the card screen. */}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={role === 'vendor' ? `${t.change}: ${t.who.vendor}` : `${t.manage}: ${phone}`}
-            onPress={() => (role === 'vendor' ? session.update({ vendorId: null }) : router.push('/buyer/card'))}
-            style={styles.link}>
-            <Text style={[styles.linkText, { color: colors.ink }]}>{role === 'vendor' ? t.change : t.manage}</Text>
-          </Pressable>
-        </View>
+        <Group>
+          {/* The phone opens as the first vendor or buyer the service lists; only here can it pick another. */}
+          <Row
+            detail={t.who[role]}
+            label={phone}
+            value={t.change}
+            accessibilityLabel={`${t.change}: ${t.who[role]}`}
+            onPress={() => router.push(role === 'vendor' ? '/vendor' : '/buyer')}
+          />
+        </Group>
       </Section>
 
       <Section title={t.service}>
-        <View style={[styles.box, { backgroundColor: theme.card }]}>
-          <ThemedText type="caption">{t.apiUrl}</ThemedText>
-          <ThemedText selectable style={styles.mono}>
-            {apiUrl}
-          </ThemedText>
-          <View style={styles.inline} accessibilityLiveRegion="polite">
-            <View style={[styles.dot, { backgroundColor: connection.dot }]} />
-            <Text style={[styles.connection, { color: connection.ink }]}>{connection.label}</Text>
-          </View>
-        </View>
+        <Group>
+          <Row detail={t.apiUrl} label={apiUrl} mono />
+          <Row
+            label={t.connection}
+            right={
+              <View style={styles.inline} accessibilityLiveRegion="polite">
+                <View style={[styles.dot, { backgroundColor: connection.dot }]} />
+                <Text style={[styles.connection, { color: connection.ink }]}>{connection.label}</Text>
+              </View>
+            }
+          />
+        </Group>
       </Section>
 
       <Section title={t.debug}>
-        <View style={[styles.row, { backgroundColor: theme.card }]}>
-          <ThemedText style={[styles.grow, styles.optionText]}>{t.showLabels}</ThemedText>
-          <Switch
-            accessibilityLabel={t.showLabels}
-            value={session.debugLabels}
-            onValueChange={(debugLabels) => session.update({ debugLabels })}
-            trackColor={{ false: theme.idle, true: colors.fill }}
-            thumbColor="#FFFFFF"
-          />
-        </View>
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => router.push('/debug')}
-          style={({ pressed }) => [styles.row, styles.outlined, { borderColor: theme.border, opacity: pressed ? 0.7 : 1 }]}>
-          <ThemedText style={[styles.grow, styles.strong]}>{t.openDebug}</ThemedText>
-          <MaterialCommunityIcons name="chevron-right" size={20} color={theme.text} />
-        </Pressable>
+        <Group>
+          <Row label={t.showLabels} right={toggle(t.showLabels, session.debugLabels, (debugLabels) => session.update({ debugLabels }))} />
+          <Row label={t.openDebug} onPress={() => router.push('/debug')} />
+        </Group>
       </Section>
 
       <View style={[styles.build, { borderColor: theme.border }]}>
-        <ThemedText style={styles.strong}>{appRole ? t.roleLine[appRole] : t.noRole}</ThemedText>
+        <ThemedText style={styles.rowLabel}>{appRole ? t.roleLine[appRole] : t.noRole}</ThemedText>
         <ThemedText type="caption" style={styles.mono}>
           {appRole ? `EXPO_PUBLIC_APP_ROLE=${appRole} · v${version}` : `v${version}`}
         </ThemedText>
         <ThemedText type="caption">{t.buildNote}</ThemedText>
       </View>
     </Screen>
-  );
-}
-
-type ChoicesProps<T extends string> = {
-  label: string;
-  options: { value: T; label: string }[];
-  value: T;
-  onChange: (value: T) => void;
-  ink: string;
-};
-
-// One radio row per option (language, theme).
-function Choices<T extends string>({ label, options, value, onChange, ink }: ChoicesProps<T>) {
-  const theme = useTheme();
-  return (
-    <View accessibilityRole="radiogroup" accessibilityLabel={label} style={styles.options}>
-      {options.map((option) => {
-        const checked = option.value === value;
-        return (
-          <Pressable
-            key={option.value}
-            accessibilityRole="radio"
-            accessibilityState={{ checked }}
-            onPress={() => onChange(option.value)}
-            style={[styles.option, { backgroundColor: theme.card }]}>
-            <View style={[styles.radio, { borderColor: checked ? ink : theme.muted }]}>
-              {checked && <View style={[styles.radioDot, { backgroundColor: ink }]} />}
-            </View>
-            <ThemedText style={styles.optionText}>{option.label}</ThemedText>
-          </Pressable>
-        );
-      })}
-    </View>
   );
 }
 
@@ -222,24 +186,80 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
+// A white card of rows split by hairlines; with a label it is a radio group of checked rows.
+function Group({ label, children }: { label?: string; children: ReactNode }) {
+  const theme = useTheme();
+  return (
+    <View
+      accessibilityRole={label ? 'radiogroup' : undefined}
+      accessibilityLabel={label}
+      style={[styles.group, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+      {Children.toArray(children).map((child, i) => (
+        <Fragment key={i}>
+          {i > 0 && <View style={[styles.divider, { backgroundColor: theme.border }]} />}
+          {child}
+        </Fragment>
+      ))}
+    </View>
+  );
+}
+
+type RowProps = {
+  label: string;
+  // Small caption above the label ("Comercio" over "Ana · 2 billeteras").
+  detail?: string;
+  value?: string;
+  mono?: boolean;
+  right?: ReactNode;
+  // A row that navigates ends in a chevron; a checked (or unchecked) one is a radio option with a check mark instead.
+  checked?: boolean;
+  onPress?: () => void;
+  accessibilityLabel?: string;
+};
+
+function Row({ label, detail, value, mono, right, checked, onPress, accessibilityLabel }: RowProps) {
+  const theme = useTheme();
+  const body = (
+    <>
+      <View style={styles.grow}>
+        {detail && <ThemedText type="caption">{detail}</ThemedText>}
+        <ThemedText selectable={!onPress} style={[styles.rowLabel, mono && styles.mono]}>
+          {label}
+        </ThemedText>
+      </View>
+      {value && <Text style={[styles.value, { color: theme.primaryInk }]}>{value}</Text>}
+      {right}
+      {checked !== undefined
+        ? checked && <MaterialCommunityIcons name="check" size={22} color={theme.primaryInk} />
+        : onPress && <MaterialCommunityIcons name="chevron-right" size={22} color={theme.muted} />}
+    </>
+  );
+  if (!onPress) return <View style={styles.row}>{body}</View>;
+  return (
+    <Pressable
+      accessibilityRole={checked === undefined ? 'button' : 'radio'}
+      accessibilityState={checked === undefined ? undefined : { checked }}
+      accessibilityLabel={accessibilityLabel}
+      onPress={onPress}
+      style={({ pressed }) => [styles.row, pressed && styles.pressed]}>
+      {body}
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   section: { gap: 8 },
-  sectionTitle: { fontSize: 13, fontWeight: '700', letterSpacing: 0.5 },
-  options: { gap: 8 },
-  option: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 14, paddingHorizontal: 14 },
-  radio: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
-  radioDot: { width: 10, height: 10, borderRadius: 5 },
-  optionText: { fontSize: 16, fontWeight: '600' },
-  row: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 14, paddingHorizontal: 14 },
-  outlined: { borderWidth: 1, minHeight: 48 },
+  sectionTitle: { fontSize: 13, fontWeight: '600', letterSpacing: 0.5 },
+  group: { borderWidth: 1, borderRadius: 14, overflow: 'hidden' },
+  divider: { height: StyleSheet.hairlineWidth, marginLeft: 14 },
+  row: { minHeight: 54, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, paddingHorizontal: 14 },
+  pressed: { opacity: 0.6 },
   grow: { flex: 1 },
-  strong: { fontSize: 16, fontWeight: '700' },
-  link: { minHeight: 44, minWidth: 44, justifyContent: 'center', paddingHorizontal: 8 },
-  linkText: { fontSize: 15, fontWeight: '700' },
-  box: { gap: 6, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 14 },
-  mono: { fontFamily: 'monospace', fontSize: 13 },
+  rowLabel: { fontSize: 16, fontWeight: '600' },
+  value: { fontSize: 15, fontWeight: '600' },
+  mono: { fontFamily: 'monospace', fontSize: 13, fontWeight: '400' },
   inline: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   dot: { width: 8, height: 8, borderRadius: 4 },
-  connection: { fontSize: 14, fontWeight: '700' },
+  connection: { fontSize: 14, fontWeight: '600' },
   build: { gap: 6, borderWidth: 1, borderStyle: 'dashed', borderRadius: 14, paddingVertical: 12, paddingHorizontal: 14 },
 });

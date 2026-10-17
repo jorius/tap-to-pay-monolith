@@ -13,7 +13,7 @@ import { useTheme } from '@/hooks/use-theme';
 type IconName = ComponentProps<typeof MaterialCommunityIcons>['name'];
 export type RoleTab = { name: string; title: string; icon: IconName };
 
-// The bottom navigation of each build (design: active tab in the role's ink over a tinted pill).
+// The bottom navigation of each build: the active tab in the brand's teal over a tinted pill, on a white bar.
 export function RoleTabs({ role, tabs }: { role: AppRole; tabs: RoleTab[] }) {
   const theme = useTheme();
   const { debugLabels } = useSession();
@@ -28,7 +28,7 @@ export function RoleTabs({ role, tabs }: { role: AppRole; tabs: RoleTab[] }) {
         headerRightContainerStyle: styles.headerRight,
         tabBarActiveTintColor: colors.ink,
         tabBarInactiveTintColor: theme.muted,
-        tabBarStyle: { backgroundColor: theme.background, borderTopColor: theme.border },
+        tabBarStyle: { backgroundColor: theme.surface, borderTopColor: theme.border },
         tabBarLabelStyle: styles.label,
       }}>
       {tabs.map((tab) => (

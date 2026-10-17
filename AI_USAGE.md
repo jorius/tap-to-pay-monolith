@@ -6,7 +6,14 @@ State as of 2026-10-16, commit `5ce21db`. AI helped with every file of code in t
 
 | Tool | Model / plan | Used by | What we used it for |
 | --- | --- | --- | --- |
-| Claude Code | Claude | The whole team: Jorius, VictorJVA, Jacobo Zuluaga, Santiago | Design document, product research, mobile app, NFC native module, service, tests, coding prompts, local setup and debugging |
+| Claude Code | Claude Opus 5.5 and Claude Fable 5.1, at max effort | The whole team: Jorius, VictorJVA, Jacobo Zuluaga, Santiago | Design document, product research, mobile app, NFC native module, service, tests, coding prompts, local setup and debugging |
+
+### Models and effort
+
+| Model | Effort | Used for |
+| --- | --- | --- |
+| Claude Opus 5.5 (`claude-opus-5-5`) | max | The main Claude Code session and the sub-agents it forked: SDD changes, both scaffolds, app screens, the NFC native module, service features and tests, HTTPS release builds, the Paynela rename and visual identity, the logo, the in-app grant flow, the prompt log |
+| Claude Fable 5.1 (`claude-fable-5-1`) | max | The five sub-agents of the design refresh against the team's artifact (17 Oct 2026): the vendor's charge flow, Mis ventas and Más, the buyer's home and activation, Movimientos, Cuenta and Mis límites, and the shared welcome, add-wallet and settings screens |
 
 ## Where AI was used
 

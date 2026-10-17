@@ -1,10 +1,19 @@
 import {
   createAuthenticatedClient,
+  isFinalizedGrantWithAccessToken,
   isPendingGrant,
   type AuthenticatedClient,
 } from '@interledger/open-payments';
 import type { Amount } from '../services/money.js';
-import { toWalletError, WalletError, type OpenPayments, type WalletInfo } from './types.js';
+import {
+  toWalletError,
+  WalletError,
+  type OpenPayments,
+  type OutgoingGrantRequest,
+  type PendingGrant,
+  type RotatedToken,
+  type WalletInfo,
+} from './types.js';
 
 export type OpenPaymentsConfig = {
   walletAddressUrl: string;
@@ -94,6 +103,52 @@ class SdkOpenPayments implements OpenPayments {
       // The public view has no `completed`; callers compare receivedAmount with the sale amount.
       return { receivedAmount: BigInt(payment.receivedAmount.value), completed: false };
     });
+  }
+
+  requestOutgoingPaymentGrant(wallet: WalletInfo, { dailyDebit, intervalStart, finishUri, clientNonce }: OutgoingGrantRequest) {
+    return wrap(async (): Promise<PendingGrant> => {
+      const grant = await this.client.grant.request(
+        { url: wallet.authServer },
+        {
+          access_token: {
+            access: [
+              {
+                type: 'outgoing-payment',
+                actions: ['create', 'read'],
+                identifier: wallet.id,
+                limits: {
+                  debitAmount: { value: dailyDebit.toString(), assetCode: wallet.assetCode, assetScale: wallet.assetScale },
+                  interval: `R/${intervalStart}/P1D`,
+                },
+              },
+            ],
+          },
+          interact: { start: ['redirect'], finish: { method: 'redirect', uri: finishUri, nonce: clientNonce } },
+        },
+      );
+      if (!isPendingGrant(grant)) throw new WalletError('Expected an interactive grant, got a finalized one');
+      return {
+        redirect: grant.interact.redirect,
+        interactNonce: grant.interact.finish,
+        continueUri: grant.continue.uri,
+        continueToken: grant.continue.access_token.value,
+      };
+    });
+  }
+
+  continueGrant({ continueUri, continueToken }: Pick<PendingGrant, 'continueUri' | 'continueToken'>, interactRef: string) {
+    return wrap(async (): Promise<RotatedToken> => {
+      const continued = await this.client.grant.continue(
+        { url: continueUri, accessToken: continueToken },
+        { interact_ref: interactRef },
+      );
+      if (!isFinalizedGrantWithAccessToken(continued)) throw new WalletError('The grant did not finalize with a token');
+      return { value: continued.access_token.value, manage: continued.access_token.manage };
+    });
+  }
+
+  revokeToken(manageUrl: string, accessToken: string) {
+    return wrap(() => this.client.token.revoke({ url: manageUrl, accessToken }));
   }
 
   /** Requested on every charge and never cached. */

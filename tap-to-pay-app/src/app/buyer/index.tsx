@@ -62,7 +62,7 @@ export default function BuyerIdentity() {
             accessibilityRole="button"
             accessibilityLabel={`${buyer.name}, ${t.wallets(count)}, ${buyer.hasGrant ? t.granted : t.notGranted}`}
             onPress={() => pick(buyer)}
-            style={({ pressed }) => [styles.row, { backgroundColor: theme.card, opacity: pressed ? 0.8 : 1 }]}>
+            style={({ pressed }) => [styles.row, { backgroundColor: theme.surface, borderColor: theme.border, opacity: pressed ? 0.8 : 1 }]}>
             <Initials name={buyer.name} size={44} background={colors.tint} color={colors.ink} />
             <View style={styles.info}>
               <ThemedText style={styles.name}>{buyer.name}</ThemedText>
@@ -84,9 +84,9 @@ export default function BuyerIdentity() {
 }
 
 const styles = StyleSheet.create({
-  row: { minHeight: 84, flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 18, padding: 14 },
+  row: { minHeight: 84, flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 16, borderWidth: 1, padding: 14 },
   info: { flex: 1, gap: 5 },
-  name: { fontSize: 17, fontWeight: '700' },
+  name: { fontSize: 17, fontWeight: '600' },
   mono: { fontFamily: 'monospace', fontSize: 12 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
 });

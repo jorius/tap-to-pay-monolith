@@ -56,7 +56,7 @@ export default function VendorIdentity() {
             accessibilityRole="button"
             accessibilityLabel={`${vendor.name}, ${vendor.assetCode}, ${t.wallets(count)}`}
             onPress={() => pick(vendor)}
-            style={({ pressed }) => [styles.row, { backgroundColor: theme.card, opacity: pressed ? 0.8 : 1 }]}>
+            style={({ pressed }) => [styles.row, { backgroundColor: theme.surface, borderColor: theme.border, opacity: pressed ? 0.8 : 1 }]}>
             <View style={[styles.avatar, { backgroundColor: tint }]}>
               <Text style={[styles.initials, { color: ink }]}>{initials(vendor.name)}</Text>
             </View>
@@ -88,11 +88,11 @@ function initials(name: string) {
 }
 
 const styles = StyleSheet.create({
-  row: { minHeight: 76, flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14, borderRadius: 18 },
+  row: { minHeight: 76, flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14, borderRadius: 16, borderWidth: 1 },
   avatar: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
-  initials: { fontSize: 16, fontWeight: '800' },
+  initials: { fontSize: 16, fontWeight: '600' },
   info: { flex: 1, gap: 4 },
-  name: { fontSize: 17, fontWeight: '700' },
+  name: { fontSize: 17, fontWeight: '600' },
   mono: { fontFamily: 'monospace', fontSize: 11.5 },
-  asset: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 2, borderWidth: 1, borderRadius: 999, fontSize: 12, fontWeight: '700' },
+  asset: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 2, borderWidth: 1, borderRadius: 999, fontSize: 12, fontWeight: '600' },
 });

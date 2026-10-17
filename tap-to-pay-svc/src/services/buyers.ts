@@ -1,7 +1,8 @@
-import type { BuyerSales, BuyerView } from '../contracts.js';
+import type { BuyerSales, BuyerView, GrantStart } from '../contracts.js';
 import type { BuyerWalletRow, BuyerWithWallets, Limits } from '../db/repos.js';
-import { toWalletError, type WalletInfo } from '../open-payments/types.js';
+import { isUnauthorized, toWalletError, type WalletInfo } from '../open-payments/types.js';
 import { HttpError, validation } from './errors.js';
+import { finishGrant, InteractionHashError, startGrant } from './grants.js';
 import { dayRange, remainingToday } from './limits.js';
 import { parseAmount } from './money.js';
 import type { Deps } from './sales.js';
@@ -9,8 +10,10 @@ import { buyerView, defaultWallet, saleView } from './views.js';
 
 type BuyerDeps = Pick<Deps, 'repo' | 'now' | 'timeZone'>;
 type WalletDeps = BuyerDeps & Pick<Deps, 'op' | 'defaultLimits'>;
+type GrantDeps = BuyerDeps & Pick<Deps, 'op' | 'pendingGrants'>;
 
 const HISTORY_SIZE = 20;
+const GRANT_TTL_MS = 10 * 60_000;
 
 export async function listBuyerViews(deps: BuyerDeps): Promise<BuyerView[]> {
   const buyers = await deps.repo.listBuyers();
@@ -103,6 +106,74 @@ export async function removeWallet(deps: BuyerDeps, buyerId: string, walletId: s
   const wasDefault = defaultWallet(buyer).id === walletId;
   await deps.repo.deleteWallet(walletId);
   if (wasDefault) await deps.repo.setDefaultWallet(buyerId, buyer.wallets.find((w) => w.id !== walletId)!.id);
+  return getBuyer(deps, buyerId);
+}
+
+/**
+ * POST /buyers/:id/wallets/:walletId/grant: the app's authorization screen asks for the wallet's grant, capped at
+ * `amount` per day (default: the wallet's dailyLimit). The app opens redirectUrl; the wallet then sends the buyer to
+ * finishUri, from where the app relays interact_ref and hash. A new start replaces an unfinished one.
+ */
+export async function requestWalletGrant(
+  deps: GrantDeps,
+  buyerId: string,
+  walletId: string,
+  input: { finishUri: string; amount?: string },
+): Promise<GrantStart> {
+  if (!URL.canParse(input.finishUri)) throw validation(`finishUri must be a URL, got ${JSON.stringify(input.finishUri)}`);
+  const wallet = ownWallet(await loadBuyer(deps, buyerId), walletId);
+  const dailyDebit = input.amount === undefined ? wallet.dailyLimit : parseAmount(input.amount);
+  let started: Awaited<ReturnType<typeof startGrant>>;
+  try {
+    started = await startGrant(deps.op, wallet, { dailyDebit, finishUri: input.finishUri, now: deps.now(), timeZone: deps.timeZone });
+  } catch (err) {
+    throw new HttpError(502, 'GRANT_FAILED', toWalletError(err).message);
+  }
+  deps.pendingGrants.set(walletId, { grant: started.grant, expiresAt: deps.now().getTime() + GRANT_TTL_MS });
+  return { redirectUrl: started.grant.redirect };
+}
+
+/** POST /buyers/:id/wallets/:walletId/grant/finish: one try per start, whatever the outcome. */
+export async function finishWalletGrant(
+  deps: GrantDeps,
+  buyerId: string,
+  walletId: string,
+  input: { interactRef: string; hash: string },
+): Promise<BuyerView> {
+  ownWallet(await loadBuyer(deps, buyerId), walletId);
+  const pending = deps.pendingGrants.get(walletId);
+  deps.pendingGrants.delete(walletId);
+  if (!pending || pending.expiresAt <= deps.now().getTime()) {
+    throw new HttpError(409, 'GRANT_NOT_PENDING', `No authorization in progress for wallet ${walletId}: start it again`);
+  }
+  try {
+    await finishGrant(deps, pending.grant, input);
+  } catch (err) {
+    if (err instanceof InteractionHashError) {
+      throw new HttpError(400, 'GRANT_HASH_MISMATCH', "The wallet's answer did not verify: start the authorization again");
+    }
+    throw new HttpError(502, 'GRANT_FAILED', toWalletError(err).message);
+  }
+  return getBuyer(deps, buyerId);
+}
+
+/**
+ * DELETE /buyers/:id/wallets/:walletId/grant: revokes the wallet's grant at the wallet, best effort, and forgets it, so
+ * the app offers to authorize again. A grant the buyer already revoked in the wallet answers 401, 403 or 404.
+ */
+export async function revokeWalletGrant(deps: GrantDeps, buyerId: string, walletId: string): Promise<BuyerView> {
+  const wallet = ownWallet(await loadBuyer(deps, buyerId), walletId);
+  if (wallet.grantAccessToken && wallet.grantManageUrl) {
+    try {
+      await deps.op.revokeToken(wallet.grantManageUrl, wallet.grantAccessToken);
+    } catch (err) {
+      // Forgotten either way: the service can no longer charge with it, and the buyer can still revoke it in the wallet.
+      if (!isUnauthorized(err) && toWalletError(err).status !== 404) {
+        console.warn(`Could not revoke the grant of wallet ${walletId}: ${toWalletError(err).message}`);
+      }
+    }
+  }
+  await deps.repo.clearWalletGrant(walletId);
   return getBuyer(deps, buyerId);
 }
 
