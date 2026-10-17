@@ -1,9 +1,11 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useState, type ReactNode } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState, type ReactNode } from 'react';
+import { ActivityIndicator, Image, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+
+import { api, apiUrl, tunnelHeaders } from '@/api/client';
 
 import { formatMoney } from '@/api/money';
-import type { VendorView } from '@/api/types';
+import type { PayLink, VendorView } from '@/api/types';
 import { BigButton } from '@/components/big-button';
 import { Screen } from '@/components/screen';
 import { StatusPill } from '@/components/status-pill';
@@ -15,11 +17,10 @@ import { Keypad } from '@/components/vendor/keypad';
 import { SimulateTap } from '@/components/vendor/simulate-tap';
 import { VendorGate } from '@/components/vendor/vendor-gate';
 import { Brand, Fill, roleColors } from '@/constants/theme';
-import { useSale, type AppFailure } from '@/hooks/use-sale';
+import { useSale, type AppFailure, type ReaderState } from '@/hooks/use-sale';
 import { useSession } from '@/hooks/use-session';
 import { useTheme } from '@/hooks/use-theme';
 import { defineCopy, useCopy, useLang } from '@/i18n';
-import { NfcTap } from '@/nfc/nfc-tap';
 
 const copy = defineCopy(
   {
@@ -47,6 +48,16 @@ const copy = defineCopy(
     noNfc: 'Este teléfono no tiene NFC',
     noNfcModule: 'Este build no trae todavía el módulo NFC (NfcTap). Activa las etiquetas de depuración en Ajustes para simular el toque.',
     nfcOff: 'Enciende el NFC en Ajustes',
+    readerOff: 'venta {id} · sin lector NFC',
+    noNfcHere: 'Este teléfono no tiene NFC: cobra con el QR o por WhatsApp.',
+    nfcOffHere: 'El NFC está apagado: enciéndelo en Ajustes, o cobra con el QR o por WhatsApp.',
+    noModuleHere: 'Este build no trae el lector NFC: cobra con el QR o por WhatsApp.',
+    otherWays: 'O sin acercar el teléfono',
+    scanQr: 'El cliente escanea este código con la cámara y paga con su billetera.',
+    qrLabel: 'Código QR del cobro',
+    whatsapp: 'Enviar cobro por WhatsApp',
+    linkError: 'No pudimos preparar el link de pago.',
+    fromLink: 'Pago desde el link o el QR',
   },
   {
     amount: 'Amount',
@@ -73,6 +84,16 @@ const copy = defineCopy(
     noNfc: 'This phone has no NFC',
     noNfcModule: "This build doesn't include the NFC module (NfcTap) yet. Turn on debug labels in Settings to simulate the tap.",
     nfcOff: 'Turn NFC on in Settings',
+    readerOff: 'sale {id} · no NFC reader',
+    noNfcHere: 'This phone has no NFC: charge with the QR or by WhatsApp.',
+    nfcOffHere: 'NFC is off: turn it on in Settings, or charge with the QR or by WhatsApp.',
+    noModuleHere: "This build doesn't include the NFC reader: charge with the QR or by WhatsApp.",
+    otherWays: 'Or without a tap',
+    scanQr: 'The customer scans this code with the camera and pays with their wallet.',
+    qrLabel: 'QR code of the sale',
+    whatsapp: 'Send the charge by WhatsApp',
+    linkError: "Couldn't prepare the payment link.",
+    fromLink: 'Paid from the link or the QR',
   },
 );
 
@@ -162,30 +183,39 @@ function Terminal({ vendor, reload }: { vendor: VendorView; reload: () => Promis
 
       {(sale.state === 'awaiting_tap' || sale.state === 'nfc_error') && (
         <>
-          <View style={[styles.tapCircle, { backgroundColor: colors.tint }]}>
-            <MaterialCommunityIcons name="contactless-payment" size={104} color={Brand.vendor} />
-          </View>
-          {sale.state === 'awaiting_tap' ? (
+          {sale.reader === 'on' ? (
             <>
-              <Text style={[styles.lead, { color: theme.text }]}>{t.hold}</Text>
-              <View style={styles.center}>
-                <StatusPill
-                  tone="wait"
-                  label={fill(NfcTap ? t.readerOn : t.readerSimulated, { id: sale.sale?.id ?? '' })}
-                />
+              <View style={[styles.tapCircle, { backgroundColor: colors.tint }]}>
+                <MaterialCommunityIcons name="contactless-payment" size={104} color={Brand.vendor} />
               </View>
+              {sale.state === 'awaiting_tap' ? (
+                <>
+                  <Text style={[styles.lead, { color: theme.text }]}>{t.hold}</Text>
+                  <View style={styles.center}>
+                    <StatusPill tone="wait" label={fill(t.readerOn, { id: sale.sale?.id ?? '' })} />
+                  </View>
+                </>
+              ) : (
+                <>
+                  <View style={styles.center}>
+                    <StatusPill tone="bad" label={sale.nfcError ?? ''} />
+                  </View>
+                  <Text style={[styles.lead, { color: theme.text }]}>{t.nfcRetry}</Text>
+                  <ThemedText type="caption" style={styles.centerText}>
+                    {t.readerStays}
+                  </ThemedText>
+                </>
+              )}
             </>
           ) : (
             <>
+              <Text style={[styles.lead, { color: theme.text }]}>{readerText(sale.reader, t)}</Text>
               <View style={styles.center}>
-                <StatusPill tone="bad" label={sale.nfcError ?? ''} />
+                <StatusPill tone="wait" label={fill(t.readerOff, { id: sale.sale?.id ?? '' })} />
               </View>
-              <Text style={[styles.lead, { color: theme.text }]}>{t.nfcRetry}</Text>
-              <ThemedText type="caption" style={styles.centerText}>
-                {t.readerStays}
-              </ThemedText>
             </>
           )}
+          {sale.sale && <OtherWays saleId={sale.sale.id} />}
           {debugLabels && <SimulateTap onTap={sale.tap} />}
           <BigButton label={t.cancel} color={colors.ink} ghost onPress={sale.reset} />
         </>
@@ -195,8 +225,8 @@ function Terminal({ vendor, reload }: { vendor: VendorView; reload: () => Promis
         <>
           <ActivityIndicator size="large" color={Brand.vendor} style={styles.spinner} />
           <ThemedView card style={styles.center}>
-            <ThemedText type="caption">{t.walletRead}</ThemedText>
-            <Text style={[styles.mono, { color: theme.text }]}>{sale.walletAddress}</Text>
+            <ThemedText type="caption">{sale.walletAddress ? t.walletRead : t.fromLink}</ThemedText>
+            {sale.walletAddress ? <Text style={[styles.mono, { color: theme.text }]}>{sale.walletAddress}</Text> : null}
           </ThemedView>
           <View style={styles.center} accessibilityLiveRegion="polite">
             <StatusPill tone="wait" label={t.charging} />
@@ -238,6 +268,51 @@ function Terminal({ vendor, reload }: { vendor: VendorView; reload: () => Promis
     </Screen>
   );
 }
+
+function readerText(reader: ReaderState, t: (typeof copy)['es']) {
+  if (reader === 'no_nfc') return t.noNfcHere;
+  if (reader === 'nfc_off') return t.nfcOffHere;
+  return t.noModuleHere;
+}
+
+// The two ways to pay without a tap. Both open the service's payment page, which calls the same charge as the tap.
+function OtherWays({ saleId }: { saleId: string }) {
+  const theme = useTheme();
+  const t = useCopy(copy);
+  const [link, setLink] = useState<PayLink | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    api<PayLink>(`/sales/${saleId}/pay-link`)
+      .then((l) => alive && setLink(l))
+      .catch(() => alive && setFailed(true));
+    return () => {
+      alive = false;
+    };
+  }, [saleId]);
+
+  return (
+    <ThemedView card style={styles.center}>
+      <ThemedText type="caption">{t.otherWays}</ThemedText>
+      <Image
+        accessibilityLabel={t.qrLabel}
+        source={{ uri: `${apiUrl}/sales/${encodeURIComponent(saleId)}/qr.png`, headers: tunnelHeaders }}
+        style={styles.qr}
+      />
+      <ThemedText type="caption" style={styles.centerText}>
+        {t.scanQr}
+      </ThemedText>
+      <View style={styles.fullWidth}>
+        <BigButton label={t.whatsapp} color={WHATSAPP} disabled={!link} onPress={() => link && Linking.openURL(link.whatsappUrl)} />
+      </View>
+      {failed ? <Text style={[styles.centerText, { color: theme.badInk }]}>{t.linkError}</Text> : null}
+    </ThemedView>
+  );
+}
+
+// WhatsApp's dark green: white text on it passes contrast, unlike the brand's light green.
+const WHATSAPP = '#128C7E';
 
 function appFailureText(failure: AppFailure | null, t: (typeof copy)['es'], networkTemplate: string) {
   if (!failure) return '';
@@ -297,4 +372,6 @@ const styles = StyleSheet.create({
   spinner: { marginVertical: 24, transform: [{ scale: 1.6 }] },
   mono: { fontFamily: 'monospace', fontSize: 12, textAlign: 'center' },
   outcome: { fontSize: 30, fontWeight: '800', textAlign: 'center' },
+  qr: { width: 220, height: 220, marginVertical: 8, backgroundColor: '#FFFFFF', borderRadius: 12 },
+  fullWidth: { alignSelf: 'stretch', marginTop: 8 },
 });

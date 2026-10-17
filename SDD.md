@@ -360,6 +360,9 @@ Nineteen JSON endpoints on port 4000, one envelope, no authentication. Every res
 | `GET /sales/:id` | `/vendor/sale`, every 1 s while `CHARGING`, at most 30 | | 200 | `SaleView`; a `CHARGING` sale is re-checked against the wallet first |
 | `GET /vendors/:id/summary?range=today\|week\|month&walletId=` | `/vendor/dashboard` | | 200 | `VendorSummary` of ONE receiving wallet, the default unless `walletId` names another, so totals never mix assets: paid, pending (`CHARGING`) and failed counts, totals in that wallet's asset, `averageTicket`, 24 hourly buckets for today or one per day for the last 7 or 30 local days; default `today` |
 | `GET /vendors/:id/sales?status=&date=YYYY-MM-DD&limit=50&walletId=` | `/vendor/transactions` | | 200 | `VendorSaleView[]`, newest first, every receiving wallet's unless `walletId` names one, each row in its own asset; `AWAITING_TAP` only when asked for; `date` is a local day; `limit` capped at 200 |
+| `GET /pay/:id` | buyer's browser, from the QR or WhatsApp | | 200 HTML | the payment page: vendor and amount, a wallet address field remembered on the phone, *Pay* calls `POST /sales/:id/charge`, then polls `GET /sales/:id`; an unknown sale is an HTML 404 |
+| `GET /sales/:id/qr.png` | `/vendor/sale` while waiting | | 200 PNG | QR of the payment page URL (`PUBLIC_URL`, else the request's proto and host, proxy headers honoured); `no-store` |
+| `GET /sales/:id/pay-link` | `/vendor/sale` while waiting | | 200 | `{ url, text, whatsappUrl }`: the page URL and a `wa.me` link with the message ready for any contact |
 | `GET /debug/wallets` | `/debug` | | 200 | `DebugWallets`: the client address, then every buyer wallet and every vendor wallet (one entry per wallet, under its owner's name), each resolved live (`reachable`, asset, wallet's `error`, buyer `hasGrant`); never throws, never returns a token |
 
 **Views** (built in the service's `src/services/views.ts`, mirrored in the app's `src/api/types.ts`)

@@ -4,12 +4,14 @@ import type { HttpErrorCode } from './contracts.js';
 import { buyersRouter } from './routes/buyers.js';
 import { debugRouter } from './routes/debug.js';
 import { healthRouter } from './routes/health.js';
+import { payRouter } from './routes/pay.js';
 import { salesRouter } from './routes/sales.js';
 import { vendorsRouter } from './routes/vendors.js';
 import { HttpError } from './services/errors.js';
 import type { Deps } from './services/sales.js';
 
-export type AppMeta = { clientWalletAddress: string };
+// publicUrl: where buyers reach the payment page (PUBLIC_URL); unset, it is derived from each request.
+export type AppMeta = { clientWalletAddress: string; publicUrl?: string };
 
 // shortcut: no authentication; anyone on the network can read buyers, change limits and create sales.
 export function createApp(deps: Deps, meta: AppMeta) {
@@ -20,6 +22,7 @@ export function createApp(deps: Deps, meta: AppMeta) {
   app.use(vendorsRouter(deps));
   app.use(buyersRouter(deps));
   app.use(salesRouter(deps));
+  app.use(payRouter(deps, meta.publicUrl));
   app.use(debugRouter(deps, meta));
 
   app.use((req, res) => {
