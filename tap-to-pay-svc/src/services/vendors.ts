@@ -14,8 +14,9 @@ const CLAIMED_OR_REFUSED: SaleStatus[] = ['PAID', 'CHARGING', 'FAILED'];
 
 export async function listVendorViews(deps: Pick<Deps, 'repo'>): Promise<VendorView[]> {
   const vendors = await deps.repo.listVendors();
-  // A vendor left without wallets has no view; skip it rather than fail the whole list (add:wallet repairs it).
-  return vendors.filter((v) => v.wallets.length > 0).map(vendorView);
+  // A vendor left without wallets has no view; skip it rather than fail the whole list (add:wallet repairs it). Billers
+  // (EPM, Claro, …) receive recurring payments and never run a terminal, so they are not offered either.
+  return vendors.filter((v) => v.wallets.length > 0 && v.kind !== 'BILLER').map(vendorView);
 }
 
 /**
@@ -83,10 +84,11 @@ export async function vendorSummary(
 export async function listVendorSales(
   deps: VendorDeps,
   vendorId: string,
-  query: { status?: SaleStatus; date?: string; limit: number; walletId?: string },
+  query: { status?: SaleStatus; date?: string; limit: number; walletId?: string; direction?: 'in' | 'out' | 'all' },
 ): Promise<VendorSaleView[]> {
   const vendor = await loadVendor(deps, vendorId);
-  if (query.walletId !== undefined) ownVendorWallet(vendor, query.walletId);
+  const wallet = query.walletId === undefined ? undefined : ownVendorWallet(vendor, query.walletId);
+  const direction = query.direction ?? 'all';
   let day: { from: Date; to: Date } | undefined;
   if (query.date) {
     const [year, month, date] = query.date.split('-').map(Number);
@@ -95,16 +97,38 @@ export async function listVendorSales(
       to: localInstant(year, month, date + 1, 0, deps.timeZone),
     };
   }
-  const sales = await deps.repo.listVendorSales(vendorId, {
-    statuses: query.status ? [query.status] : CLAIMED_OR_REFUSED,
-    ...day,
-    limit: query.limit,
-    walletId: query.walletId,
-  });
-  return sales.map((sale) => ({
-    ...saleView(sale, vendor.wallets.find((w) => w.id === sale.vendorWalletId)?.publicName ?? vendor.name),
-    buyerName: sale.buyerPublicName ?? sale.buyerName,
-  }));
+  const statuses = query.status ? [query.status] : CLAIMED_OR_REFUSED;
+
+  const incoming: VendorSaleView[] =
+    direction === 'out'
+      ? []
+      : (
+          await deps.repo.listVendorSales(vendorId, { statuses, ...day, limit: query.limit, walletId: query.walletId })
+        ).map((sale) => ({
+          ...saleView(sale, vendor.wallets.find((w) => w.id === sale.vendorWalletId)?.publicName ?? vendor.name),
+          direction: 'IN',
+          buyerName: sale.buyerPublicName ?? sale.buyerName,
+          payeeName: null,
+        }));
+
+  // The recurring payments the vendor made from its own wallets (its payer identity, same addresses).
+  let outgoing: VendorSaleView[] = [];
+  if (direction !== 'in' && vendor.payerBuyerId) {
+    const payer = await deps.repo.getBuyer(vendor.payerBuyerId);
+    const address = new Map((payer?.wallets ?? []).map((w) => [w.id, w.walletAddress]));
+    const paid = await deps.repo.listPayerSales(vendor.payerBuyerId, { ...day });
+    outgoing = paid
+      .filter((s) => s.chargedVia === 'RECURRING' && statuses.includes(s.status))
+      .filter((s) => !wallet || (s.buyerWalletId !== null && address.get(s.buyerWalletId) === wallet.walletAddress))
+      .map((sale) => {
+        const payee = sale.vendorPublicName ?? sale.vendorName;
+        return { ...saleView(sale, payee), direction: 'OUT', buyerName: null, payeeName: payee };
+      });
+  }
+
+  return [...incoming, ...outgoing]
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))
+    .slice(0, query.limit);
 }
 
 /**

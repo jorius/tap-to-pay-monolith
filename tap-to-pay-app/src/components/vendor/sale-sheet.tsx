@@ -1,6 +1,6 @@
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { formatMoney } from '@/api/money';
+import { buyerAmount, formatMoney } from '@/api/money';
 import type { VendorSaleView } from '@/api/types';
 import { BigButton } from '@/components/big-button';
 import { StatusPill } from '@/components/status-pill';
@@ -13,6 +13,9 @@ import { defineCopy, useCopy, useLang } from '@/i18n';
 const copy = defineCopy(
   {
     sale: 'Venta',
+    payment: 'Pago de servicio',
+    payee: 'Servicio',
+    concept: 'Concepto',
     created: 'Creada',
     paidAt: 'Pagada',
     buyer: 'Comprador',
@@ -23,6 +26,9 @@ const copy = defineCopy(
   },
   {
     sale: 'Sale',
+    payment: 'Bill payment',
+    payee: 'Service',
+    concept: 'For',
     created: 'Created',
     paidAt: 'Paid',
     buyer: 'Buyer',
@@ -49,12 +55,12 @@ export function SaleSheet({ sale, onClose }: { sale: VendorSaleView | null; onCl
             <View style={[styles.handle, { backgroundColor: theme.border }]} />
             <View style={styles.titleRow}>
               <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>
-                {t.sale}
+                {sale.direction === 'OUT' ? t.payment : t.sale}
               </Text>
               <StatusPill tone={STATUS_TONE[sale.status]} label={v.status[sale.status]} />
             </View>
             <Text style={[styles.amount, { color: theme.text }]}>
-              {formatMoney(sale.amount, sale.assetScale, sale.assetCode, lang)}
+              {sale.direction === 'OUT' ? `− ${buyerAmount(sale, lang)}` : formatMoney(sale.amount, sale.assetScale, sale.assetCode, lang)}
             </Text>
             {sale.status === 'FAILED' && (
               <View style={[styles.failure, { backgroundColor: theme.badTint }]}>
@@ -64,7 +70,12 @@ export function SaleSheet({ sale, onClose }: { sale: VendorSaleView | null; onCl
             )}
             <Row label={t.created} value={time(sale.createdAt, lang, true)} />
             <Row label={t.paidAt} value={sale.paidAt ? time(sale.paidAt, lang, true) : '—'} />
-            <Row label={t.buyer} value={sale.buyerName ?? v.unregistered} />
+            {sale.direction === 'OUT' ? (
+              <Row label={t.payee} value={sale.payeeName ?? '—'} />
+            ) : (
+              <Row label={t.buyer} value={sale.buyerName ?? v.unregistered} />
+            )}
+            {sale.description ? <Row label={t.concept} value={sale.description} /> : null}
             <View style={styles.row}>
               <Text style={[styles.label, { color: theme.muted }]}>{t.saleId}</Text>
               <Text selectable style={[styles.code, styles.value, { color: theme.text }]}>

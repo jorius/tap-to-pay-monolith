@@ -359,10 +359,18 @@ Twenty-two JSON endpoints on port 4000, plus a QR image and a web page for payme
 | `POST /sales/:id/charge` | `/vendor/sale`, after the tap | `{ walletAddress }`, a URL | 200 | `SaleView` as `PAID`, `CHARGING` or `FAILED`; blocks up to `CHARGE_POLL_SECONDS` plus wallet latency |
 | `GET /sales/:id` | `/vendor/sale`, every 1 s while `CHARGING`, at most 30 | | 200 | `SaleView`; a `CHARGING` sale is re-checked against the wallet first |
 | `GET /vendors/:id/summary?range=today\|week\|month&walletId=` | `/vendor/dashboard` | | 200 | `VendorSummary` of ONE receiving wallet, the default unless `walletId` names another, so totals never mix assets: paid, pending (`CHARGING`) and failed counts, totals in that wallet's asset, `averageTicket`, 24 hourly buckets for today or one per day for the last 7 or 30 local days; default `today` |
-| `GET /vendors/:id/sales?status=&date=YYYY-MM-DD&limit=50&walletId=` | `/vendor/transactions` | | 200 | `VendorSaleView[]`, newest first, every receiving wallet's unless `walletId` names one, each row in its own asset; `AWAITING_TAP` only when asked for; `date` is a local day; `limit` capped at 200 |
+| `GET /vendors/:id/sales?status=&date=YYYY-MM-DD&limit=50&walletId=&direction=in\|out\|all` | `/vendor/transactions`; the dashboard's latest sales with `direction=in` | | 200 | `VendorSaleView[]`, the vendor's movements newest first: `IN` sales received (`buyerName`) and `OUT` recurring payments the vendor made (`payeeName`, `debitAmount` is what left its wallet); every receiving wallet's unless `walletId` names one, each row in its own asset; `AWAITING_TAP` only when asked for; `date` is a local day; `direction` defaults to `all`; `limit` capped at 200 |
 | `POST /sales/:id/payment-link` | vendor, to share a sale by WhatsApp or QR | `{ phone?, lang? }`: phone with country code, `es` (default) or `en` | 200 | `PaymentLinkView`: `code`, `url` (the web page, also the QR content), `appUrl` (`<APP_SCHEME>://pay/<code>`), `qrSvgUrl`, `whatsappUrl` (`wa.me`, to `phone` when given) and `message`, `expiresAt`; the same code while it is live, a new one once it expired; only for an `AWAITING_TAP` sale |
 | `GET /pay/:code` | buyer's payment screen | | 200 | `PaymentRequestView`: vendor name, amount, `description`, `status`, `expiresAt`, `expired`; never wallet URLs |
 | `POST /pay/:code/charge` | buyer's payment screen | `{ walletAddress }`, a URL | 200 | as `POST /sales/:id/charge`, the same rules and orchestration, with `chargedVia: LINK`; `410` once the link expired |
+| `GET /vendors/:id/statement.pdf?month=YYYY-MM&lang=es\|en` | `/vendor/transactions`, *Download PDF* | | 200 PDF | the monthly statement for a lender, one section per receiving wallet with activity (see §10, "Monthly statement"); `month` defaults to the current local month, a future one is `400` |
+| `GET /billers` | `/vendor/recurring` | | 200 | `BillerView[]`: the catalog of Colombian services (EPM, Claro, Tigo, Movistar, ETB, Vanti), each `available` when a wallet is configured for it |
+| `GET /vendors/:id/payer` | `/vendor/recurring` | | 200 | `VendorPayerView`: the vendor's payer identity, created on first use, with every vendor wallet and whether it is authorized (`hasGrant`, `grantCommand`) |
+| `GET /vendors/:id/recurring` | `/vendor/recurring` | | 200 | `RecurringView[]`, oldest first |
+| `POST /vendors/:id/recurring` | `/vendor/recurring`, *Add payment* | `{ billerId \| payeeName + payeeWalletAddress, reference?, amount, dayOfMonth, walletId? }`; `amount` in whole units ("45000.50"), `dayOfMonth` 1 to 28 | 201 | `RecurringView`; the payee wallet is resolved live and prices the amount |
+| `PATCH /vendors/:id/recurring/:rid` | `/vendor/recurring` | `{ active }` | 200 | `RecurringView`; resuming schedules the next run from now |
+| `DELETE /vendors/:id/recurring/:rid` | `/vendor/recurring` | | 200 | `{ removed: true }` |
+| `POST /vendors/:id/recurring/:rid/pay` | `/vendor/recurring`, *Pay now* | | 200 | `SaleView`, as a charge: a refusal is a `200` with the sale `FAILED` |
 | `GET /debug/wallets` | `/debug` | | 200 | `DebugWallets`: the client address, then every buyer wallet and every vendor wallet (one entry per wallet, under its owner's name), each resolved live (`reachable`, asset, wallet's `error`, buyer `hasGrant`); never throws, never returns a token |
 
 **Views** (built in the service's `src/services/views.ts`, mirrored in the app's `src/api/types.ts`)
@@ -486,6 +494,29 @@ Rule refusals of a registered wallet appear in its buyer's history as `FAILED` w
 
 The vendor terminal creates sales on a phone without NFC, or with NFC off, too: it says so and offers the QR and WhatsApp, and while a sale waits it re-reads it every 2 s, so a payment through the link ends on the same *Paid* screen as a tap. The sale is still chargeable by tap while its link is live, and whichever channel claims it first wins (the conditional claim); the other gets `409`. A refused charge ends the sale `FAILED` as a refused tap does, so the vendor creates a new sale and link. Links are built on `PUBLIC_URL`, else on the request that created them (proxy headers honoured), which must be reachable from the buyer's phone; the WhatsApp preview only appears for a public URL.
 
+**Recurring payments**: a vendor enrols once in a monthly payment to a service, and the service pays it on the chosen day. Paying the business's bills on time, month after month, is the payment history the monthly statement shows a lender.
+
+1. *Pagos* in the vendor app lists the catalog (`GET /billers`): EPM, Claro, Tigo, Movistar, ETB and Vanti, drawn as badges in their brand colour with their initials (the logos are trademarks and do not ship), plus *Another service* with any Interledger wallet. Each catalog service receives into the wallet set for it in `BILLER_WALLETS`, else `BILLERS_DEFAULT_WALLET`.
+2. Money leaves the vendor's own wallet, and Open Payments needs a grant for that. The vendor gets a **payer identity** (`Vendor.payerBuyerId`): a buyer holding the vendor's own wallet addresses, created on first use (`GET /vendors/:id/payer`) and left out of `GET /buyers`. The vendor authorizes it once with `npm run grant:buyer -- --buyer <its wallet address>`; the app shows that command while a wallet is not authorized. Its caps are left open (shortcut): the grant's daily debit limit is what bounds the bills.
+3. The vendor gives the reference (contract or line number), the amount in whole units, the day of the month (1 to 28) and, with several authorized wallets, which one pays. The service resolves the payee wallet, prices the amount in its asset and schedules `nextRunAt` at 08:00 local on that day, this month if still ahead, else next month. A vendor cannot enrol a payment to one of its own wallets.
+4. Every `RECURRING_CHECK_MINUTES`, and once at start, the service runs each active payment whose `nextRunAt` has come. It first moves `nextRunAt` to next month with a conditional update, so two ticks never charge the same month twice, then pays: the payee becomes a vendor of kind `BILLER` (left out of `GET /vendors`), a sale is created with the description `<payee> · <reference> · pago recurrente`, and `chargeSale` charges it from the payer wallet, recording `chargedVia: RECURRING`. Rules, grant, cross-asset and rotation are those of a tap.
+5. The outcome is stored on the enrolment (`lastStatus`, `lastMessage`, `lastSaleId`). A refused or failed run counts as a missed payment in the statement and waits for next month or *Pay now*; nothing retries on its own.
+
+**Monthly statement**: `GET /vendors/:id/statement.pdf` turns the ledger into a lender-ready statement, two A4 pages per receiving wallet with activity.
+
+- **Page 1, payment capacity**, over the last 6 months:
+  - average and lowest monthly income, and income stability (coefficient of variation: high below 25 %, medium below 50 %, low otherwise);
+  - average monthly obligations (the vendor's recurring payments, in the wallet's asset), obligations to income, and estimated payment capacity (average income minus average obligations, per month);
+  - a month-by-month table: income, sales, days with sales, obligations paid, net flow, payments made on time;
+  - a chart of income against obligations;
+  - the payment history (payments on time out of those due, and average monthly growth);
+  - the list of this month's obligations.
+
+  Averages run from the first month with income, so a new business is not averaged with months before it existed.
+- **Page 2, the month's sales:** revenue, approved sales, average and median ticket, customers, approval rate and refusals, change against the previous month, best day, busiest hour, channels, revenue per day and a 6-month trend.
+
+Every page ends with a 12-character verification code (a SHA-256 of the figures) and a note that balances live in the wallet and that the document is not a bank certificate. The vendor app opens it from the *Panel* tab, for this month or the two before.
+
 **Resolving a stuck `CHARGING` sale**: read `outgoingPaymentUrl` and `incomingPaymentUrl` from the row, check both in the Test Wallet, then `UPDATE "Sale" SET status = 'PAID', "paidAt" = now() WHERE id = $1` or `SET status = 'FAILED', "failureCode" = 'MANUAL', "failureMessage" = '…'`.
 
 ## 11. Security and trust boundaries
@@ -543,6 +574,9 @@ Each app reads one `.env`, git-ignored, copied from a committed `.env.example`. 
 | `SEED_PER_PAYMENT_LIMIT`, `SEED_DAILY_LIMIT` | `2000`, `5000` | in the wallet's smallest unit; with scale 2 that is 20.00 and 50.00 of whatever asset the wallet has; also the caps of any wallet added without its own (`POST /buyers/:id/wallets`, `add:wallet`, `add:buyer`) |
 | `DAILY_LIMIT_TZ` | `America/Bogota` | the calendar day for the daily cap; not validated at startup |
 | `CHARGE_POLL_SECONDS` | `8` | how long a charge request waits for the payment to land |
+| `BILLER_WALLETS` | none | `id=url` pairs, comma-separated: the wallet each catalog service receives recurring payments into |
+| `BILLERS_DEFAULT_WALLET` | none | the wallet for catalog services not in `BILLER_WALLETS`; with neither, a service shows as unavailable |
+| `RECURRING_CHECK_MINUTES` | `15` | how often the service runs the recurring payments that are due |
 | `PUBLIC_URL` | none | the base of payment links (`http://<laptop-LAN-IP>:4000`, or an https host or tunnel); without it a link uses the request that created it, `x-forwarded-proto` and `x-forwarded-host` honoured |
 | `PAYMENT_LINK_TTL_MINUTES` | `1440` | how long a payment link can be charged |
 | `APP_SCHEME` | `taptopayapp` | the app's URL scheme (`app.json` `scheme`); the link page opens `<scheme>://pay/<code>` |

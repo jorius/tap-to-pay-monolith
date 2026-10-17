@@ -2,7 +2,7 @@
 export type SaleStatus = 'AWAITING_TAP' | 'CHARGING' | 'PAID' | 'FAILED';
 
 // How the buyer reached the charge: a tap on the terminal, or the sale's payment link (WhatsApp or QR).
-export type ChargeChannel = 'NFC' | 'LINK';
+export type ChargeChannel = 'NFC' | 'LINK' | 'RECURRING';
 
 export type SaleView = {
   id: string;
@@ -151,5 +151,58 @@ export type VendorSummary = {
   buckets: { start: string; count: number; total: string }[];
 };
 
-// GET /vendors/:id/sales?status=PAID|CHARGING|FAILED&date=YYYY-MM-DD&limit=50: newest first, AWAITING_TAP left out.
-export type VendorSaleView = SaleView & { buyerName: string | null };
+// GET /vendors/:id/sales?status=PAID|CHARGING|FAILED&date=YYYY-MM-DD&limit=50&direction=in|out|all: the vendor's
+// movements, newest first, AWAITING_TAP left out. IN is a sale received (buyerName); OUT is a recurring payment the vendor
+// made (payeeName, and debitAmount is what left its wallet).
+export type VendorSaleView = SaleView & { direction: 'IN' | 'OUT'; buyerName: string | null; payeeName: string | null };
+
+// GET /billers: services a buyer can pay every month. The app draws each as a badge in its brand colour.
+export type BillerView = {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  color: string;
+  textColor: string;
+  initials: string;
+  // What the reference is called at this service: "Número de contrato", "Número de línea", …
+  referenceLabel: string;
+  // False when the service has no Interledger wallet configured (BILLER_WALLETS, BILLERS_DEFAULT_WALLET).
+  available: boolean;
+};
+
+// GET /vendors/:id/payer: the vendor as a payer, for its recurring payments. Each vendor wallet is a payer wallet too;
+// one pays once authorized (hasGrant) by running grantCommand in tap-to-pay-svc.
+export type PayerWallet = {
+  id: string;
+  walletAddress: string;
+  publicName: string | null;
+  assetCode: string;
+  assetScale: number;
+  hasGrant: boolean;
+  isDefault: boolean;
+  grantCommand: string;
+};
+export type VendorPayerView = { buyerId: string; wallets: PayerWallet[] };
+
+// GET /vendors/:id/recurring: one monthly payment of the vendor, in the payee's asset.
+export type RecurringView = {
+  id: string;
+  billerId: string | null;
+  payeeName: string;
+  payeeWalletAddress: string;
+  reference: string | null;
+  amount: string;
+  amountFormatted: string;
+  assetCode: string;
+  assetScale: number;
+  dayOfMonth: number;
+  // The paying wallet, one of the vendor's payer wallets; null when the default one pays.
+  walletId: string | null;
+  active: boolean;
+  nextRunAt: string;
+  lastRunAt: string | null;
+  lastSaleId: string | null;
+  lastStatus: SaleStatus | null;
+  lastMessage: string | null;
+};

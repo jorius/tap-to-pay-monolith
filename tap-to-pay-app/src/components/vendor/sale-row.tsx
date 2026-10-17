@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { formatMoney } from '@/api/money';
+import { buyerAmount, formatMoney } from '@/api/money';
 import type { VendorSaleView } from '@/api/types';
 import { StatusPill } from '@/components/status-pill';
 import { vendorCopy } from '@/components/vendor/copy';
@@ -13,8 +13,12 @@ export function SaleRow({ sale, onPress }: { sale: VendorSaleView; onPress?: () 
   const theme = useTheme();
   const lang = useLang();
   const t = useCopy(vendorCopy);
-  const amount = formatMoney(sale.amount, sale.assetScale, sale.assetCode, lang);
-  const who = [sale.buyerName ?? t.unregistered, sale.failureCode].filter(Boolean).join(' · ');
+  const out = sale.direction === 'OUT';
+  // A payment out shows what left the vendor's wallet (the quote's debit), with a minus sign.
+  const amount = out ? `− ${buyerAmount(sale, lang)}` : formatMoney(sale.amount, sale.assetScale, sale.assetCode, lang);
+  const who = [out ? t.paymentTo(sale.payeeName ?? '') : (sale.buyerName ?? t.unregistered), sale.failureCode]
+    .filter(Boolean)
+    .join(' · ');
 
   return (
     <Pressable
@@ -24,7 +28,7 @@ export function SaleRow({ sale, onPress }: { sale: VendorSaleView; onPress?: () 
       style={({ pressed }) => [styles.row, { borderBottomColor: theme.border, opacity: pressed ? 0.7 : 1 }]}>
       <Text style={[styles.time, { color: theme.muted }]}>{time(sale.createdAt, lang)}</Text>
       <View style={styles.middle}>
-        <Text style={[styles.amount, { color: theme.text }]}>{amount}</Text>
+        <Text style={[styles.amount, { color: out ? theme.muted : theme.text }]}>{amount}</Text>
         {onPress && (
           <Text numberOfLines={1} style={[styles.who, { color: theme.muted }]}>
             {who}

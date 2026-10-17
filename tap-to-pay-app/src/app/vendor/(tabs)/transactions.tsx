@@ -23,6 +23,8 @@ const copy = defineCopy(
     walletFilter: 'Filtrar por billetera',
     allWallets: 'Todas',
     statusFilter: 'Filtrar por estado',
+    directionFilter: 'Filtrar por tipo',
+    directions: { all: 'Todos', in: 'Ventas', out: 'Pagos' },
     filters: { ALL: 'Todos', PAID: 'Pagados', CHARGING: 'Pendientes', FAILED: 'Fallidos' },
     today: 'Hoy',
     yesterday: 'Ayer',
@@ -35,6 +37,8 @@ const copy = defineCopy(
     walletFilter: 'Filter by wallet',
     allWallets: 'All',
     statusFilter: 'Filter by status',
+    directionFilter: 'Filter by type',
+    directions: { all: 'All', in: 'Sales', out: 'Payments' },
     filters: { ALL: 'All', PAID: 'Paid', CHARGING: 'Pending', FAILED: 'Failed' },
     today: 'Today',
     yesterday: 'Yesterday',
@@ -46,6 +50,9 @@ const copy = defineCopy(
 );
 
 const FILTERS: Filter[] = ['ALL', 'PAID', 'CHARGING', 'FAILED'];
+// Sales received, recurring payments made (Pagos), or both.
+type Direction = 'all' | 'in' | 'out';
+const DIRECTIONS: Direction[] = ['all', 'in', 'out'];
 
 export default function TransactionsScreen() {
   return <VendorGate>{(vendor, _replace, reload) => <Transactions vendor={vendor} reload={reload} />}</VendorGate>;
@@ -60,10 +67,11 @@ function Transactions({ vendor, reload }: { vendor: VendorView; reload: () => Pr
   // A wallet removed in the Billetera tab falls back to all of them.
   const walletId = wallets.some((w) => w.id === picked) ? picked : 'ALL';
   const [filter, setFilter] = useState<Filter>('ALL');
+  const [direction, setDirection] = useState<Direction>('all');
   const [daysBack, setDaysBack] = useState(0);
   const [refreshes, setRefreshes] = useState(0);
   const day = localDay(daysBack);
-  const query = `date=${day.iso}&limit=50${filter === 'ALL' ? '' : `&status=${filter}`}${walletId === 'ALL' ? '' : `&walletId=${walletId}`}`;
+  const query = `date=${day.iso}&limit=50&direction=${direction}${filter === 'ALL' ? '' : `&status=${filter}`}${walletId === 'ALL' ? '' : `&walletId=${walletId}`}`;
   const label = daysBack === 0 ? t.today : daysBack === 1 ? t.yesterday : day.date.toLocaleDateString(locale(lang), { day: 'numeric', month: 'short' });
 
   return (
@@ -80,6 +88,12 @@ function Transactions({ vendor, reload }: { vendor: VendorView; reload: () => Pr
           onChange={setPicked}
         />
       )}
+      <FilterChips
+        label={t.directionFilter}
+        options={DIRECTIONS.map((value) => ({ value, label: t.directions[value] }))}
+        value={direction}
+        onChange={setDirection}
+      />
       <FilterChips
         label={t.statusFilter}
         options={FILTERS.map((value) => ({ value, label: t.filters[value] }))}

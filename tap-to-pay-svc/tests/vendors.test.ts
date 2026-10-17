@@ -170,8 +170,37 @@ describe('listVendorSales', () => {
       chargedVia: null,
       createdAt: '2026-10-14T14:00:00.000Z',
       paidAt: null,
+      direction: 'IN',
       buyerName: null,
+      payeeName: null,
     });
+  });
+
+  it("adds the vendor's recurring payments as OUT movements, by date, status and wallet", async () => {
+    const { deps, repo, vendor, sale } = setup();
+    sale('2026-10-14T09:00:00.000Z', 'PAID');
+    const payer = repo.addBuyer({ name: 'Tienda · pagos', wallet: { walletAddress: vendor.wallet.walletAddress } });
+    await repo.setVendorPayer(vendor.id, payer.id);
+    const epm = repo.addVendor({ name: 'EPM', kind: 'BILLER', wallet: { walletAddress: 'https://ilp.test/epm', publicName: 'EPM Medellín' } });
+    const bill = (iso: string, status: 'PAID' | 'FAILED', chargedVia = 'RECURRING') =>
+      repo.addSale({ vendorId: epm.id, buyerId: payer.id, buyerWalletId: payer.wallet.id, status, amount: 500n, chargedVia, createdAt: new Date(iso) });
+    const paid = bill('2026-10-14T10:00:00.000Z', 'PAID');
+    bill('2026-10-13T10:00:00.000Z', 'FAILED');
+    bill('2026-10-14T11:00:00.000Z', 'PAID', 'NFC'); // a tap purchase of the payer is not a movement of the vendor
+
+    const all = await listVendorSales(deps, vendor.id, { limit: 50 });
+    expect(all.map((s) => [s.direction, s.payeeName, s.status])).toEqual([
+      ['OUT', 'EPM Medellín', 'PAID'],
+      ['IN', null, 'PAID'],
+      ['OUT', 'EPM Medellín', 'FAILED'],
+    ]);
+    expect(all[0]).toMatchObject({ id: paid.id, vendorName: 'EPM Medellín', buyerName: null, debitAmount: '500' });
+    expect((await listVendorSales(deps, vendor.id, { limit: 50, direction: 'in' })).map((s) => s.direction)).toEqual(['IN']);
+    expect(await listVendorSales(deps, vendor.id, { limit: 50, direction: 'out', status: 'FAILED' })).toHaveLength(1);
+    expect(await listVendorSales(deps, vendor.id, { limit: 50, direction: 'out', date: '2026-10-13' })).toHaveLength(1);
+    const other = repo.addVendorWallet(vendor.id, { walletAddress: 'https://ilp.test/tienda-eur', assetCode: 'EUR' });
+    expect(await listVendorSales(deps, vendor.id, { limit: 50, direction: 'out', walletId: other.id })).toEqual([]);
+    expect(await listVendorSales(deps, vendor.id, { limit: 1 })).toHaveLength(1);
   });
 
   it("names each sale after its wallets' public names, else the registered names", async () => {
@@ -263,7 +292,7 @@ describe('vendor wallets', () => {
 
   it("makes a vendor's first wallet the default", async () => {
     const { deps, repo } = setup();
-    repo.vendors.set('v0', { id: 'v0', name: 'Nueva', defaultWalletId: null, createdAt: NOW });
+    repo.vendors.set('v0', { id: 'v0', name: 'Nueva', defaultWalletId: null, kind: 'MERCHANT', payerBuyerId: null, createdAt: NOW });
     const view = await addVendorWallet(deps, 'v0', TIENDA_EUR);
     expect(view).toMatchObject({
       defaultWalletId: view.wallets[0].id,
@@ -351,7 +380,7 @@ describe('vendor wallets', () => {
 
   it('lists vendors with their wallets, leaving out one without wallets', async () => {
     const { deps, repo } = setup();
-    repo.vendors.set('v0', { id: 'v0', name: 'Nueva', defaultWalletId: null, createdAt: NOW });
+    repo.vendors.set('v0', { id: 'v0', name: 'Nueva', defaultWalletId: null, kind: 'MERCHANT', payerBuyerId: null, createdAt: NOW });
     expect((await listVendorViews(deps)).map((v) => [v.name, v.wallets.length])).toEqual([['Tienda', 1]]);
   });
 

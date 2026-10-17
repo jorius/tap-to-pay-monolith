@@ -27,6 +27,7 @@ State as of 2026-10-16, commit `5ce21db`. AI helped with every file of code in t
 | `tap-to-pay-svc/scripts/` (`seed`, `grant-buyer`, `add-buyer`, `add-wallet`) | Claude Code | Generated from `SDD.md` section 10, step 3, and the multi-wallet design |
 | `tap-to-pay-svc/tests/` | Claude Code | Generated alongside the code; covers the table in `SDD.md` section 13 |
 | Payment links, QR and WhatsApp: `tap-to-pay-svc/src/services/payment-links.ts`, `src/routes/payment-links.ts`, `tests/payment-links.test.ts`, the `payment_links` migration; `tap-to-pay-app/src/app/pay/`, `src/components/vendor/share-sale.tsx`, `src/hooks/use-payment-link.ts`, `src/hooks/use-sale.ts` | Claude Code | Two sessions built it separately (`prompts/qr-whatsapp-pay.txt`, `prompts/payment-links.txt`) and a third merged them: coded and expiring links, the in-app scanner and payment screen, the WhatsApp message, the browser payment page and sales on phones without NFC |
+| Monthly statement PDF and recurring payments: `tap-to-pay-svc/src/services/statement.ts`, `statement-pdf.ts`, `recurring.ts`, `billers.ts`, `src/routes/recurring.ts`, the `recurring_payments` migration and their tests; `tap-to-pay-app/src/app/vendor/(tabs)/recurring.tsx`, `src/components/recurring/`, `src/components/vendor/statement-card.tsx` | Claude Code | Generated with Claude from the request summarized in `prompts/statement-and-recurring.txt`, and reworked on review so the vendor, not the buyer, owns the recurring payments and the PDF shows payment capacity; the PDF was rendered and checked page by page, and enrolment was checked against the Test Wallet |
 | `prompts/` | Claude Code | The build prompts were written with Claude from the SDD and the code |
 
 ## Files with little or no AI involvement
@@ -44,6 +45,7 @@ The exact text of the coding prompts we kept as files is in [`prompts/`](prompts
 - [`remove-asset-mismatch.txt`](prompts/remove-asset-mismatch.txt): accept sales between wallets in different assets.
 - [`qr-whatsapp-pay.txt`](prompts/qr-whatsapp-pay.txt): the first QR and WhatsApp payment link, with a browser payment page.
 - [`payment-links.txt`](prompts/payment-links.txt): coded payment links in the service and the app, and the merge of both versions.
+- [`statement-and-recurring.txt`](prompts/statement-and-recurring.txt): the monthly statement PDF with payment capacity for a lender, and the vendor's recurring payments to Colombian services.
 
 Commits made with Claude Code that carry the trailer `Co-Authored-By: Claude …` are listed by `git log --grep "Co-Authored-By: Claude"`.
 

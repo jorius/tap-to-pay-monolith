@@ -12,6 +12,7 @@ import { BarChart, type Bar } from '@/components/vendor/bar-chart';
 import { FilterChips } from '@/components/vendor/chips';
 import { fill, locale, walletSite } from '@/components/vendor/format';
 import { SaleRow } from '@/components/vendor/sale-row';
+import { StatementCard } from '@/components/vendor/statement-card';
 import { ErrorState, LoadingState } from '@/components/vendor/states';
 import { VendorGate } from '@/components/vendor/vendor-gate';
 import { defaultFirst, vendorWallets, walletLabel } from '@/components/vendor/wallets';
@@ -89,7 +90,7 @@ function Dashboard({ vendor, reload }: { vendor: VendorView; reload: () => Promi
   const [refreshes, setRefreshes] = useState(0);
   // Starts on the receiving wallet; a wallet removed in the Billetera tab falls back to it too.
   const wallet = wallets.find((w) => w.id === walletId) ?? wallets[0];
-  const latest = useApi<VendorSaleView[]>(`/vendors/${vendor.id}/sales?limit=3&walletId=${wallet.id}`);
+  const latest = useApi<VendorSaleView[]>(`/vendors/${vendor.id}/sales?limit=3&walletId=${wallet.id}&direction=in`);
 
   return (
     <Screen
@@ -113,6 +114,9 @@ function Dashboard({ vendor, reload }: { vendor: VendorView; reload: () => Promi
       />
       {/* Keyed by range, wallet and pull-to-refresh so each shows a spinner and re-reads instead of the previous figures. */}
       <Summary key={`${range}:${wallet.id}:${refreshes}`} vendorId={vendor.id} wallet={wallet} range={range} />
+
+      {/* The monthly financial statement for a lender: payment capacity and the month's sales, as a PDF. */}
+      <StatementCard vendorId={vendor.id} />
 
       <View style={styles.section}>
         <Text accessibilityRole="header" style={[styles.h2, { color: theme.text }]}>
