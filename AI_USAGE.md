@@ -1,12 +1,13 @@
 # AI Usage
 
-State as of 2026-10-16, commit `5ce21db`. AI helped with every file of code in this repository.
+State as of 2026-10-16, branch `docs/entrega` (main at `d8551b9` plus `feat/qr-whatsapp-pay`). AI helped with every file of code in this repository.
 
 ## Tools used
 
 | Tool | Model / plan | Used by | What we used it for |
 | --- | --- | --- | --- |
-| Claude Code | Claude | The whole team: Jorius, VictorJVA, Jacobo Zuluaga, Santiago | Design document, product research, mobile app, NFC native module, service, tests, coding prompts, local setup and debugging |
+| Claude Code | Claude (each author confirms the model in their prompt files) | The whole team: Jorius, VictorJVA, Jacobo Zuluaga, Santiago | Design document, product research, mobile app, NFC native module, service, tests, coding prompts, local setup and debugging |
+| Claude Code | Claude Opus 5.5 | Santiago | QR and WhatsApp payment link, README, SDD clean-up, this file's update, prompt log |
 
 ## Where AI was used
 
@@ -14,18 +15,21 @@ State as of 2026-10-16, commit `5ce21db`. AI helped with every file of code in t
 | --- | --- | --- |
 | `SDD.md` | Claude Code | Edited during the event from our design: Mermaid architecture diagram, two-folder layout, multi-wallet and cross-asset sections |
 | `CORE_FEATURES.md` | Claude | Review of an existing payments app and the SoftPOS product proposal |
-| `tap-to-pay-svc/` and `tap-to-pay-app/` scaffolds | Claude Code | Generated from `prompts/RAW_initial_prompt.txt` |
+| `tap-to-pay-svc/` and `tap-to-pay-app/` scaffolds | Claude Code | Generated from `prompts/01-initial-scaffold.md` |
 | `tap-to-pay-app/src/app/` (welcome, role picker, vendor and buyer tabs, debug) | Claude Code | Screens and navigation generated, then redesigned for UI/UX |
 | `tap-to-pay-app/src/components/`, `src/constants/theme.ts` | Claude Code | Components and theme generated: keypad, sale sheet, charts, payment feedback, status pills, wallet panels |
 | `tap-to-pay-app/src/hooks/`, `src/api/`, `src/i18n/` | Claude Code | The sale state machine, session, API client and translations generated |
 | `tap-to-pay-app/modules/nfc-tap/` (`Apdu.kt`, `HceCardService.kt`, `NfcTapModule.kt`), `scripts/nfc-logs.sh`, `scripts/build-apk.sh` | Claude Code | Native Kotlin module for the HCE card and the NFC reader generated from `SDD.md` section 6 |
 | `tap-to-pay-app/.gitignore` | Claude Code | Stopped tracking the module's Android build output |
-| `tap-to-pay-svc/src/services/` (`money`, `limits`, `sales`, `buyers`, `vendors`, `views`, `public-names`, `debug`) | Claude Code | Generated from `SDD.md` sections 7–10 with `prompts/backend-service.txt`, then extended: cross-asset sales (`prompts/remove-asset-mismatch.txt`), several wallets per buyer and per vendor, grant limits, public wallet names |
+| `tap-to-pay-svc/src/services/` (`money`, `limits`, `sales`, `buyers`, `vendors`, `views`, `public-names`, `debug`) | Claude Code | Generated from `SDD.md` sections 7–10 with `prompts/02-backend-service.md`, then extended: cross-asset sales (`prompts/03-remove-asset-mismatch.md`), several wallets per buyer and per vendor, grant limits, public wallet names |
 | `tap-to-pay-svc/prisma/` (schema and migrations), `src/db/` | Claude Code | Generated; migration SQL produced with `prisma migrate diff` |
 | `tap-to-pay-svc/src/app.ts`, `src/routes/`, `src/config.ts`, `src/server.ts`, `src/contracts.ts` | Claude Code | Generated from `SDD.md` sections 7, 9 and 12, then extended with new routes and logging |
 | `tap-to-pay-svc/src/open-payments/` | Claude Code | SDK client, errors and interaction hash generated against the `@interledger/open-payments` 7.4.0 type definitions |
 | `tap-to-pay-svc/scripts/` (`seed`, `grant-buyer`, `add-buyer`, `add-wallet`) | Claude Code | Generated from `SDD.md` section 10, step 3, and the multi-wallet design |
 | `tap-to-pay-svc/tests/` | Claude Code | Generated alongside the code; covers the table in `SDD.md` section 13 |
+| `tap-to-pay-svc/src/services/pay.ts`, `src/routes/pay.ts`, `tests/pay.test.ts` | Claude Code | The payment page, QR and WhatsApp link endpoints and their tests ([prompt 05](prompts/05-qr-whatsapp-pay.md)) |
+| `tap-to-pay-app/src/hooks/use-sale.ts`, `src/app/vendor/(tabs)/sale.tsx` | Claude Code | QR and WhatsApp options on the terminal, sales on phones without NFC, following a sale paid from the link ([prompt 05](prompts/05-qr-whatsapp-pay.md)) |
+| `README.md`, `tap-to-pay-app/app.config.ts` | Claude Code | The project README and a TypeScript fix ([prompt 06](prompts/06-submission-docs.md)) |
 | `prompts/` | Claude Code | The build prompts were written with Claude from the SDD and the code |
 
 ## Files with little or no AI involvement
@@ -36,11 +40,14 @@ State as of 2026-10-16, commit `5ce21db`. AI helped with every file of code in t
 
 ## Prompts
 
-The exact text of the coding prompts we kept as files is in [`prompts/`](prompts/):
+The exact text of every coding prompt is in [`prompts/`](prompts/), one file per prompt (`NN-<slug>.md`), listed in [prompts/README.md](prompts/README.md):
 
-- [`RAW_initial_prompt.txt`](prompts/RAW_initial_prompt.txt): SDD changes and scaffolding for both folders.
-- [`backend-service.txt`](prompts/backend-service.txt): the build prompt for the first version of the service.
-- [`remove-asset-mismatch.txt`](prompts/remove-asset-mismatch.txt): accept sales between wallets in different assets.
+- [01](prompts/01-initial-scaffold.md): SDD changes and scaffolding for both folders.
+- [02](prompts/02-backend-service.md): the build prompt for the first version of the service.
+- [03](prompts/03-remove-asset-mismatch.md): accept sales between wallets in different assets.
+- 04: the UI/UX redesign. **Still to add.**
+- [05](prompts/05-qr-whatsapp-pay.md): pay a sale by QR or WhatsApp link.
+- [06](prompts/06-submission-docs.md): README, SDD clean-up, this file, prompt log.
 
 Commits made with Claude Code that carry the trailer `Co-Authored-By: Claude …` are listed by `git log --grep "Co-Authored-By: Claude"`.
 

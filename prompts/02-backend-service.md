@@ -1,3 +1,12 @@
+# 02 Backend service from the SDD
+
+- When: 2026-10-16 12:25 COT · Tool: Claude Code (model to confirm by the author) · Who: VictorJVA
+- Files: `tap-to-pay-svc/` services, routes, Prisma schema, Open Payments client, scripts and tests (commit c7cc580, PR #1)
+- Kept or changed: to fill in by the author
+
+## Prompt (verbatim)
+
+````text
 Read SDD.md (sections 7–13 are the spec). Build the complete backend in `tap-to-pay-svc/` on top of the existing scaffold (package.json, tsconfig, docker-compose, .env.example, src/app.ts, src/server.ts). The SDD says `apps/api` and `packages/contracts`; here the service lives in `tap-to-pay-svc/` and the view types go in `src/contracts.ts`. Keep the pinned versions from section 5.
 
 Build in this order, tests green before moving on:
@@ -9,3 +18,4 @@ Build in this order, tests green before moving on:
 5. `src/open-payments/client.ts` with `@interledger/open-payments` (15 s timeout, non-interactive grants per charge, `getPublic`, `token.rotate`), `hash.ts` (`verifyInteractionHash`, tolerant per section 10), and `scripts/grant-buyer.ts` (listener on `localhost:4100/finish`). Wire everything in `server.ts`.
 
 Rules: services never import Prisma or the SDK; amounts are `bigint` internally and digit strings in JSON; never return or log the grant token; mark each section 11 shortcut with a `shortcut:` comment. Add the scripts `db:migrate`, `db:generate`, `seed`, `grant:buyer`. Finish with `npm run typecheck` and `npm test` green, and give a summary of files and tests.
+````

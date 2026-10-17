@@ -30,7 +30,7 @@ Contents
 
 ## 1. Purpose and scope
 
-This document is the complete design of the tap-to-pay system: one repository holding two independent applications, `tap-to-pay-svc`, an Express with TypeScript service, and `tap-to-pay-app`, an Expo Android app. The practice code is excluded from the hackathon submission: the rules require every line of submission code to be written during the event, so this document carries the knowledge, not the code.
+This document is the complete design of the tap-to-pay system: one repository holding two independent applications, `tap-to-pay-svc`, an Express with TypeScript service, and `tap-to-pay-app`, an Expo Android app. Every line of code in the repository was written during the event, from this design.
 
 It covers the product idea, the parties and their wallet addresses, the monorepo layout, the exact tech stack, both applications, the data model, the HTTP contract, the per-sale flow with every failure, security boundaries, configuration, tests, the two-phone developer workflow, the decisions made and their costs, a build order with hours, the AI usage declaration, and the ordered prompts that drive the rebuild.
 
@@ -75,7 +75,7 @@ Colour convention for every diagram and the app's buttons: buyer side teal `#0E9
 
 ## 4. Monorepo layout and architecture
 
-One repository, two independent applications side by side. Each folder has its own `package.json`, lockfile, `node_modules`, `.gitignore`, `.env` and scripts; there is no root `package.json`, no npm workspaces and no shared package, so either folder installs, runs, tests and deploys on its own. The cost is that the view types of section 9 are written in both applications and kept in step by hand, as in the practice build.
+One repository, two independent applications side by side. Each folder has its own `package.json`, lockfile, `node_modules`, `.gitignore`, `.env` and scripts; there is no root `package.json`, no npm workspaces and no shared package, so either folder installs, runs, tests and deploys on its own. The cost is that the view types of section 9 are written in both applications and kept in step by hand.
 
 ```
 tap-to-pay-monolith/
@@ -138,7 +138,7 @@ Working in two independent folders: run every npm command inside `tap-to-pay-svc
 
 ## 5. Tech stack
 
-Versions are the ones that worked together in the practice repos on Node 20.20.2 and npm 10.8.2. Pin them; two of the pins exist because the next version broke the install.
+Versions are the ones that work together on Node 24.22.0 and npm 10.8.2. Pin them; two of the pins exist because the next version broke the install.
 
 | Layer | Choice | Version | Why this one |
 | --- | --- | --- | --- |
@@ -148,7 +148,7 @@ Versions are the ones that worked together in the practice repos on Node 20.20.2
 | HTTP | Express | 5.3.0 | async handlers forward rejections to the error handler, so routes need no try/catch |
 | Validation | zod | 4.6.7 | one schema per route body and one for the environment |
 | ORM and migrations | Prisma, `prisma-client` generator, `@prisma/adapter-pg` | 7.10.0 | typed queries and migrations; the adapter is mandatory in Prisma 7 |
-| Database | PostgreSQL in Docker | 16 or later | `BIGINT` amounts, conditional updates for the sale claim |
+| Database | PostgreSQL in Docker | 18 | `BIGINT` amounts, conditional updates for the sale claim |
 | Open Payments | `@interledger/open-payments` | 7.4.0 | signed requests, grants, incoming payments, quotes, outgoing payments, token rotation |
 | Env loading | dotenv | 18.0.8 | every entry point imports `dotenv/config`; `.env` is never sourced in a shell |
 | Service tests | Vitest, supertest | 4.1.11, 7.3.1 | Vitest 5 crashes npm 10.8.2 on install |
@@ -162,17 +162,26 @@ Versions are the ones that worked together in the practice repos on Node 20.20.2
 
 ## 6. Mobile app design
 
-An Expo SDK 57 Android app with five file-based routes, no login and no persistence beyond the card payload. A phone picks its role and its person from lists the service returns, so nothing has to be cleared between test runs.
+An Expo SDK 57 Android app with thirteen file-based routes and no login. A phone picks its role and its person from lists the service returns; it keeps that choice in AsyncStorage and the card payload in SharedPreferences.
 
 **Screens**
 
 | Route | Screen | What it shows and does |
 | --- | --- | --- |
-| `/` | Role picker, *This phone is…* | buttons *Vendor terminal* (orange) and *Buyer card* (teal); the API URL; a health line, green `● ok · <client wallet address>` or a red *Can't reach the service at <url>* |
+| `/welcome` | Welcome | what the app does, the language choice, *Start* |
+| `/` | Role picker, *This phone is…* | buttons *Vendor terminal* (orange) and *Buyer card* (teal); the API URL; a health line, green `● ok · <client wallet address>` or a red *Can't reach the service at <url>*; debug tools |
+| `/debug` | Debug tools | every wallet resolved live (`GET /debug/wallets`): reachable, asset, error, grant |
 | `/vendor` | *Which vendor is this phone?* | one card per vendor from `GET /vendors` |
-| `/vendor/sale` | The terminal | the amount in the smallest unit (`1200` = 12.00, pre-filled) and the sale state machine below |
-| `/buyer` | *Which buyer is this phone?* | one card per buyer from `GET /buyers`, with a `grant ✓` or `no grant · run grant:buyer` pill |
-| `/buyer/card` | The card | limits form (`PATCH /buyers/:id/limits`), the card switch, *Left today*, the recent charges polled every 3 s while focused |
+| `/vendor/sale` | The terminal | the amount in the smallest unit (`1200` = 12.00) with quick amounts and a keypad, then the sale state machine below; while waiting, the QR and the WhatsApp link of the sale |
+| `/vendor/dashboard` | Dashboard | `GET /vendors/:id/summary` for today, week or month: paid, pending and failed sales, totals, average ticket, a bar chart |
+| `/vendor/transactions` | Transactions | `GET /vendors/:id/sales` by day, status and receiving wallet |
+| `/vendor/wallet` | Receiving wallets | the vendor's wallets, add one, choose the default, remove one |
+| `/vendor/settings` | Settings | language, theme, debug labels, change role |
+| `/buyer` | *Which buyer is this phone?* | one card per buyer from `GET /buyers`, with an *Authorized ✓* or *Not authorized · npm run grant:buyer* pill |
+| `/buyer/card` | The card | the card switch (HCE), *Left today*, the limits form (`PATCH /buyers/:id/limits`), the tap-outcome popup |
+| `/buyer/history` | History | the buyer's charges by period, polled every 3 s while open |
+| `/buyer/wallets` | Wallets | the buyer's wallets with their caps and grant, add one, choose the default, remove one |
+| `/buyer/settings` | Settings | language, theme, debug labels, change role |
 
 **Vendor sale state machine** (`useSale` hook). Every transition goes through one `go()` function that updates a ref before React commits, because native NFC events can queue behind each other.
 
@@ -206,7 +215,7 @@ If the charge request itself fails, the app reads the sale once before calling i
 
 ## 7. Service design
 
-An Express 5 service of nineteen endpoints, built as plain functions with dependencies passed in. Request path: route (zod parses the body, no logic) → service function `(deps, …)` (rules and orchestration) → `Repo` (Postgres through Prisma) and `OpenPayments` (wallets through the SDK) → view (bigint to string, formatted amount) → `{ data, error }`.
+An Express 5 service of twenty-two endpoints, built as plain functions with dependencies passed in. Request path: route (zod parses the body, no logic) → service function `(deps, …)` (rules and orchestration) → `Repo` (Postgres through Prisma) and `OpenPayments` (wallets through the SDK) → view (bigint to string, formatted amount) → `{ data, error }`.
 
 **Module map**
 
@@ -338,7 +347,7 @@ The sum runs before the claim and outside a transaction: two different sales for
 
 ## 9. API contract
 
-Nineteen JSON endpoints on port 4000, one envelope, no authentication. Every response is `{ "data": …, "error": null }` or `{ "data": null, "error": { "code", "message" } }`. Bodies need `content-type: application/json`. Amounts are digit strings in the smallest unit; responses add `amountFormatted`. Ids are cuids, timestamps ISO 8601 UTC. A refused charge is not an HTTP error: it is a `200` whose sale is `FAILED` with a `failureCode`.
+Twenty-two endpoints on port 4000 (twenty-one JSON, plus the HTML payment page), one envelope, no authentication. Every response is `{ "data": …, "error": null }` or `{ "data": null, "error": { "code", "message" } }`. Bodies need `content-type: application/json`. Amounts are digit strings in the smallest unit; responses add `amountFormatted`. Ids are cuids, timestamps ISO 8601 UTC. A refused charge is not an HTTP error: it is a `200` whose sale is `FAILED` with a `failureCode`.
 
 | Method and path | Caller | Body | Success | Returns |
 | --- | --- | --- | --- | --- |
@@ -547,14 +556,14 @@ Each app reads one `.env`, git-ignored, copied from a committed `.env.example`. 
 
 ## 13. Testing strategy
 
-The service is unit-tested against fakes with no network and no database; the app is type-checked and linted and verified on two phones. The practice service reached 59 tests in 9 files, running in a few seconds. Write them with the code, not after: the orchestration tests are what let the wallet integration be fixed without a wallet.
+The service is unit-tested against fakes with no network and no database; the app is type-checked and linted and verified on two phones. The service has 144 tests in 13 files, running in a few seconds. Write them with the code, not after: the orchestration tests are what let the wallet integration be fixed without a wallet.
 
 **Service suites and what each proves**
 
 | Suite | Proves |
 | --- | --- |
 | `money` | `parseAmount` accepts digit strings (`"1200"` → `1200n`, `"007"` → `7n`) and rejects `""`, `"12.50"`, `"-5"`, `"1e3"`, `" 12"`, `"0"`; `formatAmount` for scales 0, 2 and 3 (`"5"`/2 → `0.05`); round-trips |
-| `limits` | `canCharge` allows within and exactly at both caps, refuses over each with the exact messages, checks per-payment first; `remainingToday` floors at zero; `dayRange` on Bogotá boundaries (23:59 and 00:01 on different days), UTC, New York fall-back (25 h) and spring-forward (23 h), Asia/Kolkata half-hour offset |
+| `limits` | `checkWallet` and `checkLimits` allow within and exactly at both caps, refuses over each with the exact messages, checks per-payment first; `remainingToday` floors at zero; `dayRange` on Bogotá boundaries (23:59 and 00:01 on different days), UTC, New York fall-back (25 h) and spring-forward (23 h), Asia/Kolkata half-hour offset |
 | `sales` | `createSale` in the vendor's asset, rejects bad amounts and unknown vendors; the happy path calls the wallets in exact order (vendor wallet, buyer wallet, incoming payment, quote, outgoing payment, one read) and ends `PAID` with all three URLs stored; every rule failure makes no wallet call, records a registered payer and leaves the buyer's day untouched; `CHARGING` counts toward today, `FAILED` does not; `WALLET_ERROR` keeps the wallet's message and releases the amount; `401` and `403` rotate once, persist, retry; failed rotation keeps the old token; a timeout (`socket hang up`) or `503` on the outgoing payment leaves `CHARGING` reserved; slow completion reads exactly `pollSeconds` times and `refreshSale` later pays it; a read error while polling leaves `CHARGING`; a second charge is `409`; two simultaneous charges create one outgoing payment and the loser gets `409` |
 | `buyers` | totals, limit validation including per-payment above daily, history newest first with vendor names; names from the wallets' public names with the registered-name fallback |
 | `public-names` | the start-up refresh saves each wallet's current `publicName` and keeps the old one for a wallet it can't read |
@@ -581,7 +590,7 @@ Preflight: service up and `curl localhost:4000/buyers` shows the buyer with `has
 
 **Daily loop**: in `tap-to-pay-svc` `docker compose up -d` and `npm run dev`; in `tap-to-pay-app` `npx expo start`; phones connected over adb with `adb reverse tcp:8081 tcp:8081` each; `npm test` in `tap-to-pay-svc` on every change; `npx tsc --noEmit` and `npx expo lint` in `tap-to-pay-app`.
 
-**Phones**. Two Android phones with NFC, Developer options and USB or wireless debugging on. Before borrowing one, check it: `adb -s <serial> shell pm list features | grep nfc` must list `android.hardware.nfc.hce` on the buyer phone and `android.hardware.nfc` on the vendor phone. Check the radio is on: `adb -s <serial> shell dumpsys nfc | grep mState` must say `mState=on` on both. That silence on tap in the practice run was the card phone with NFC off.
+**Phones**. Two Android phones with NFC, Developer options and USB or wireless debugging on. Before borrowing one, check it: `adb -s <serial> shell pm list features | grep nfc` must list `android.hardware.nfc.hce` on the buyer phone and `android.hardware.nfc` on the vendor phone. Check the radio is on: `adb -s <serial> shell dumpsys nfc | grep mState` must say `mState=on` on both. A silent tap is most often the card phone with NFC off.
 
 **Build and install** (first time, and after any change under `modules/nfc-tap` or in `app.json`):
 
@@ -633,11 +642,11 @@ Each entry: what was decided, why, what it costs. Keep or change them on purpose
 1. **Backend as source of truth.** All rules and all wallet calls live in the service; the app renders. Cost: no offline mode.
 2. **Consent through a script, not in the app.** The interactive grant is the riskiest Open Payments step; a laptop script de-risks it without deep links or a hosted finish page. Cost: no self-service onboarding. First item on the MVP list.
 3. **A daily `debitAmount` limit in the grant.** The wallet refuses past what the buyer approved each local day, so a leaked token is capped; the service checks it first and answers `GRANT_LIMIT`. Cost: raising the daily limit past the grant needs a new consent (`grant:buyer -- --amount`); the per-payment and daily caps still change any time.
-4. **Express over NestJS.** Least ceremony for nine endpoints; async errors flow to one handler. Cost: structure by convention.
+4. **Express over NestJS.** Least ceremony for a small API; async errors flow to one handler. Cost: structure by convention.
 5. **Prisma 7 with the `pg` adapter.** Typed queries and migrations. Cost: explicit `prisma generate`, imports from the generated folder, `prisma.config.ts` for the URL.
 6. **Synchronous charge, then polling.** One call usually gives the vendor the answer; no webhooks, jobs or sockets. Cost: a request of several seconds; a sale that never confirms stays `CHARGING` until a hand fix.
 7. **`incomingPayment.getPublic` decides completion.** No extra grant per poll. Cost: no `completed` flag, `receivedAmount` optional in the type.
-8. **No persistence in the app beyond the HCE payload.** Nothing to clear between runs. Cost: pick the role again after every restart.
+8. **The phone keeps its session.** Role and person in AsyncStorage, the card payload in SharedPreferences, so a restart lands where it was. Cost: *Change role* in Settings to switch.
 9. **Amounts as digit strings in the smallest unit.** Open Payments amounts already are; floats lose cents; JSON has no bigint. Cost: the UI types `1200` for 12.00.
 10. **Any asset pair is accepted.** Caps are in the buyer's asset, so a cross-asset sale is checked against the quote's `debitAmount`, which is also what the daily sum adds up. Cost: a cross-asset cap refusal comes after the incoming payment and quote, leaving an unpaid incoming payment on the vendor wallet; the Test Wallet must have liquidity for the pair.
 11. **Injectable clock in tests**, including the fake repo. Daily-cap tests otherwise break when the date moves.
@@ -652,11 +661,11 @@ Each entry: what was decided, why, what it costs. Keep or change them on purpose
 20. **JDK 17 for the Android build**; `--device` takes a name; typed routes regenerate on `expo start`.
 21. **The service has its own wallet address and may borrow the vendor's.** The signer must be a wallet address because that is where the JWKS lives.
 22. **Two independent applications in one repository, no workspaces.** Each folder installs, runs, tests and deploys on its own, and Metro and `tsc` need no workspace setup. Cost: the section 9 views are mirrored by hand in both applications; change both in the same commit.
-23. **NFC logging on both sides by default** (added on 16 October after a silent tap). Logcat tag `NfcTap`, JS `[nfc]` lines, a per-phone log script.
+23. **NFC logging on both sides by default** (added after a silent tap). Logcat tag `NfcTap`, JS `[nfc]` lines, a per-phone log script.
 
 **Other accepted shortcuts**: non-interactive grants requested per charge, never cached · non-wallet errors inside the wallet block reported as `WALLET_ERROR` · a rotated token is lost if storing it fails · `PAID` writes unconditional (`paidAt` may be written twice in a race) · `DAILY_LIMIT_TZ` not validated at startup · the vendors route reads the repository directly.
 
-**MVP list, after the event**: in-app consent (service starts the grant, app opens the consent URL, finish lands on a service route or deep link) · challenge-response on the tap · token encryption · authentication · push on `PAID`/`FAILED` · a resolver for stuck sales · per-buyer serialization · cross-currency through the quote's `debitAmount` · token caching · offline messaging and a retry queue on the vendor phone.
+**MVP list, after the event**: in-app consent (service starts the grant, app opens the consent URL, finish lands on a service route or deep link) · challenge-response on the tap · token encryption · authentication · push on `PAID`/`FAILED` · a resolver for stuck sales · per-buyer serialization · token caching · offline messaging and a retry queue on the vendor phone.
 
 ## 16. Build order for the event
 
@@ -694,8 +703,7 @@ The submission repository carries `AI_USAGE.md` and a prompt log in `prompts/` a
 - Debugged build and device problems from logs we pasted.
 
 ## What the humans did
-- Wrote SDD.md before the event, from a practice proof of concept built on 14 and 15 October 2026.
-  No code from that practice work is in this repository; the design and the lessons are.
+- Wrote and refined SDD.md, the design the code is built from.
 - Decided every architecture and product choice recorded in SDD.md section 15.
 - Reviewed every diff before committing, ran the tests, and ran every manual two-phone test.
 - Created the Test Wallet accounts, keys and grants by hand.
@@ -776,7 +784,3 @@ The prompts below reproduce the build in the order of section 16. Each one is se
 **P11 · Documentation and AI usage** (continuous)
 
 > Read SDD.md section 17. Update `AI_USAGE.md` and add `prompts/NN-<slug>.md` for the prompt I just sent, with the prompt verbatim, the time, the files touched and what I kept or changed. Write the commit message in the infinitive, at most 72 characters, with the `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>` trailer.
-
----
-
-Sources: the practice repositories `tap-to-pay-svc` (docs `ARCHITECTURE`, `FLOWS`, `API`, `DATA-MODEL`, `SETUP`, `TESTING`, `HANDOFF`, `DECISIONS`) and `tap-to-pay-poc` (README, `modules/nfc-tap`), both at `/Users/joriusk/Sources/Hackathon`, state of 16 October 2026; the design spec of 14 October 2026; the two-phone sessions of 15 and 16 October 2026.

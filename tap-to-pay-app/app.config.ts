@@ -8,7 +8,8 @@ const ROLES = {
 } as const;
 
 export default ({ config }: ConfigContext): ExpoConfig => {
-  const role = process.env.EXPO_PUBLIC_APP_ROLE;
+  // process.env is untyped in the app's tsconfig (no Node types): type it here so the checks below narrow the role.
+  const role: string | undefined = process.env.EXPO_PUBLIC_APP_ROLE;
   if (!role) return config as ExpoConfig; // no role: a development build that shows the role picker
   if (role !== 'vendor' && role !== 'buyer') {
     throw new Error(`EXPO_PUBLIC_APP_ROLE must be vendor or buyer, got "${role}"`);
