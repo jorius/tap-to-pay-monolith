@@ -15,7 +15,7 @@ export const commonCopy = defineCopy(
       history: 'Historial',
       settings: 'Ajustes',
     },
-    titles: { vendor: '¿Qué comercio?', buyer: '¿Quién usa este teléfono?', debug: 'Depuración' },
+    titles: { vendor: '¿Qué comercio?', buyer: '¿Quién usa este teléfono?', debug: 'Depuración', scan: 'Pagar con QR o link', pay: 'Pagar' },
     api: {
       checking: 'Revisando el servicio. Abrir herramientas de depuración',
       connected: 'Conectado al servicio. Abrir herramientas de depuración',
@@ -35,7 +35,7 @@ export const commonCopy = defineCopy(
       history: 'History',
       settings: 'Settings',
     },
-    titles: { vendor: 'Which vendor is this?', buyer: 'Who uses this phone?', debug: 'Debug' },
+    titles: { vendor: 'Which vendor is this?', buyer: 'Who uses this phone?', debug: 'Debug', scan: 'Pay with a QR or link', pay: 'Pay' },
     api: {
       checking: 'Checking the service. Open debug tools',
       connected: 'Connected to the service. Open debug tools',

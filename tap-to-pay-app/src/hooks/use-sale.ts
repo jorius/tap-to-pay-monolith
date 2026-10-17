@@ -21,6 +21,8 @@ type Snapshot = {
 const RESET: Omit<Snapshot, 'state'> = { sale: null, walletAddress: null, nfcError: null, failure: null };
 const POLL_MS = 1000;
 const MAX_POLLS = 30;
+// While waiting for a tap, how often the sale is re-read: its payment link (WhatsApp or QR) can charge it meanwhile.
+const WATCH_MS = 2000;
 // The charge blocks up to CHARGE_POLL_SECONDS plus wallet latency (SDD §9).
 const CHARGE_TIMEOUT_MS = 30_000;
 
@@ -171,6 +173,33 @@ export function useSale(vendorId: string, { simulate }: { simulate: boolean }) {
       error.remove();
     };
   }, [go, tap]);
+
+  // A sale waiting for a tap can also be charged through its payment link. Re-read it, and once it leaves AWAITING_TAP
+  // follow it as if it had been tapped. A tap moves the state to charging first, so the two never both follow a sale.
+  const waitingId = snap.state === 'awaiting_tap' || snap.state === 'nfc_error' ? snap.sale?.id : undefined;
+  useEffect(() => {
+    if (!waitingId) return;
+    const run = runRef.current;
+    const waiting = () => runRef.current === run && (stateRef.current === 'awaiting_tap' || stateRef.current === 'nfc_error');
+    const timer = setInterval(async () => {
+      if (!waiting()) return;
+      let sale: SaleView;
+      try {
+        sale = await api<SaleView>(`/sales/${waitingId}`);
+      } catch {
+        return; // the next read tries again
+      }
+      if (!waiting() || sale.status === 'AWAITING_TAP') return;
+      console.log(`[nfc] sale ${sale.id} charged through its payment link: ${sale.status}`);
+      if (sale.status === 'CHARGING') {
+        go('charging', { sale, walletAddress: null });
+        poll(sale.id, run);
+      } else {
+        finish(sale);
+      }
+    }, WATCH_MS);
+    return () => clearInterval(timer);
+  }, [finish, go, poll, waitingId]);
 
   useEffect(
     () => () => {

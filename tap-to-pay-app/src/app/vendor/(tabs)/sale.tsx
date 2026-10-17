@@ -12,6 +12,7 @@ import { ThemedView } from '@/components/themed-view';
 import { vendorCopy } from '@/components/vendor/copy';
 import { errorText, failureText, fill, time } from '@/components/vendor/format';
 import { Keypad } from '@/components/vendor/keypad';
+import { ShareSale } from '@/components/vendor/share-sale';
 import { SimulateTap } from '@/components/vendor/simulate-tap';
 import { VendorGate } from '@/components/vendor/vendor-gate';
 import { Brand, Fill, roleColors } from '@/constants/theme';
@@ -37,6 +38,7 @@ const copy = defineCopy(
     nfcRetry: 'Inténtalo de nuevo: acerca más los teléfonos',
     readerStays: 'El lector sigue encendido.',
     walletRead: 'Billetera leída',
+    viaLink: 'Pago recibido por link o QR',
     charging: 'cobrando…',
     paid: '✓ Pagado',
     paidAt: 'a las {time}',
@@ -63,6 +65,7 @@ const copy = defineCopy(
     nfcRetry: 'Try again: hold the phones closer',
     readerStays: 'The reader stays on.',
     walletRead: 'Wallet read',
+    viaLink: 'Payment received through the link or QR',
     charging: 'charging…',
     paid: '✓ Paid',
     paidAt: 'at {time}',
@@ -186,6 +189,7 @@ function Terminal({ vendor, reload }: { vendor: VendorView; reload: () => Promis
               </ThemedText>
             </>
           )}
+          {sale.sale && <ShareSale saleId={sale.sale.id} />}
           {debugLabels && <SimulateTap onTap={sale.tap} />}
           <BigButton label={t.cancel} color={colors.ink} ghost onPress={sale.reset} />
         </>
@@ -195,8 +199,14 @@ function Terminal({ vendor, reload }: { vendor: VendorView; reload: () => Promis
         <>
           <ActivityIndicator size="large" color={Brand.vendor} style={styles.spinner} />
           <ThemedView card style={styles.center}>
-            <ThemedText type="caption">{t.walletRead}</ThemedText>
-            <Text style={[styles.mono, { color: theme.text }]}>{sale.walletAddress}</Text>
+            {sale.walletAddress ? (
+              <>
+                <ThemedText type="caption">{t.walletRead}</ThemedText>
+                <Text style={[styles.mono, { color: theme.text }]}>{sale.walletAddress}</Text>
+              </>
+            ) : (
+              <ThemedText type="caption">{t.viaLink}</ThemedText>
+            )}
           </ThemedView>
           <View style={styles.center} accessibilityLiveRegion="polite">
             <StatusPill tone="wait" label={t.charging} />
