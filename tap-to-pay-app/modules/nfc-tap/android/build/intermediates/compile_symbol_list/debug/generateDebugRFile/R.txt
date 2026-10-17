@@ -1,3 +1,0 @@
-int string nfc_tap_aid_group_description 0x0
-int string nfc_tap_service_description 0x0
-int xml nfc_tap_apduservice 0x0
