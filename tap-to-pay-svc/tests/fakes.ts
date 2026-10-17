@@ -23,6 +23,8 @@ import type { OpenPayments, Quote, RotatedToken, WalletInfo } from '../src/open-
 /** Pinned so fixture sales always fall inside the same Bogotá day, whatever the real date. */
 export const NOW = new Date('2026-10-14T15:00:00Z');
 
+export const PUBLIC_BASE_URL = 'https://pay.test';
+
 export const BUYER_WALLET = 'https://ilp.test/ana';
 export const VENDOR_WALLET = 'https://ilp.test/tienda';
 
@@ -119,6 +121,10 @@ export class FakeRepo implements Repo {
       outgoingPaymentUrl: null,
       failureCode: null,
       failureMessage: null,
+      description: null,
+      payCode: null,
+      payCodeExpiresAt: null,
+      chargedVia: null,
       createdAt: this.now(),
       paidAt: null,
       ...overrides,
@@ -208,6 +214,10 @@ export class FakeRepo implements Repo {
   }
   async getSale(id: string) {
     const sale = this.sales.get(id);
+    return sale ? { ...sale } : null;
+  }
+  async getSaleByPayCode(payCode: string) {
+    const sale = [...this.sales.values()].find((s) => s.payCode === payCode);
     return sale ? { ...sale } : null;
   }
   async updateSale(id: string, patch: SalePatch) {
@@ -395,6 +405,7 @@ export function makeDeps(overrides: Partial<Deps> = {}) {
     timeZone: 'America/Bogota',
     pollSeconds: 8,
     defaultLimits: { perPaymentLimit: 2000n, dailyLimit: 5000n },
+    links: { ttlMinutes: 60, publicBaseUrl: PUBLIC_BASE_URL, appScheme: 'taptopayapp' },
     ...overrides,
   };
   return { deps, repo, op };

@@ -338,7 +338,7 @@ The sum runs before the claim and outside a transaction: two different sales for
 
 ## 9. API contract
 
-Nineteen JSON endpoints on port 4000, one envelope, no authentication. Every response is `{ "data": …, "error": null }` or `{ "data": null, "error": { "code", "message" } }`. Bodies need `content-type: application/json`. Amounts are digit strings in the smallest unit; responses add `amountFormatted`. Ids are cuids, timestamps ISO 8601 UTC. A refused charge is not an HTTP error: it is a `200` whose sale is `FAILED` with a `failureCode`.
+Twenty-two JSON endpoints on port 4000, plus a QR image and a web page for payment links (below), one envelope, no authentication. Every response is `{ "data": …, "error": null }` or `{ "data": null, "error": { "code", "message" } }`. Bodies need `content-type: application/json`. Amounts are digit strings in the smallest unit; responses add `amountFormatted`. Ids are cuids, timestamps ISO 8601 UTC. A refused charge is not an HTTP error: it is a `200` whose sale is `FAILED` with a `failureCode`.
 
 | Method and path | Caller | Body | Success | Returns |
 | --- | --- | --- | --- | --- |
@@ -355,11 +355,14 @@ Nineteen JSON endpoints on port 4000, one envelope, no authentication. Every res
 | `PATCH /buyers/:id/wallets/:walletId/limits` | `/buyer/wallets` | as `PATCH /buyers/:id/limits` | 200 | `BuyerView` |
 | `DELETE /buyers/:id/wallets/:walletId` | `/buyer/wallets` | | 200 | `BuyerView`; never the last wallet; removing the default makes the oldest left the default; its sales keep the buyer and lose the wallet link |
 | `GET /buyers/:id/sales?walletId=&limit=` | `/buyer/history` every 3 s; the tap-outcome popup every 2 s with `limit=1` | | 200 | `{ remainingToday, sales: SaleView[] }`, the last `limit` (1 to 100, default 20), newest first, with `vendorName`; sales that reached `CHARGING` and rule refusals of the buyer's wallets appear; with `walletId` only that wallet's sales and its `remainingToday`, without it every wallet's sales and the default wallet's `remainingToday` |
-| `POST /sales` | `/vendor/sale` | `{ vendorId, amount, walletId? }` | 201 | `SaleView`, `AWAITING_TAP`, with `vendorName`, received into `walletId` (one of this vendor's), else the default wallet, and priced in that wallet's asset |
+| `POST /sales` | `/vendor/sale` | `{ vendorId, amount, walletId?, description? }` | 201 | `SaleView`, `AWAITING_TAP`, with `vendorName`, received into `walletId` (one of this vendor's), else the default wallet, and priced in that wallet's asset; `description` (at most 140 characters) is what the sale is for, shown on its payment link |
 | `POST /sales/:id/charge` | `/vendor/sale`, after the tap | `{ walletAddress }`, a URL | 200 | `SaleView` as `PAID`, `CHARGING` or `FAILED`; blocks up to `CHARGE_POLL_SECONDS` plus wallet latency |
 | `GET /sales/:id` | `/vendor/sale`, every 1 s while `CHARGING`, at most 30 | | 200 | `SaleView`; a `CHARGING` sale is re-checked against the wallet first |
 | `GET /vendors/:id/summary?range=today\|week\|month&walletId=` | `/vendor/dashboard` | | 200 | `VendorSummary` of ONE receiving wallet, the default unless `walletId` names another, so totals never mix assets: paid, pending (`CHARGING`) and failed counts, totals in that wallet's asset, `averageTicket`, 24 hourly buckets for today or one per day for the last 7 or 30 local days; default `today` |
 | `GET /vendors/:id/sales?status=&date=YYYY-MM-DD&limit=50&walletId=` | `/vendor/transactions` | | 200 | `VendorSaleView[]`, newest first, every receiving wallet's unless `walletId` names one, each row in its own asset; `AWAITING_TAP` only when asked for; `date` is a local day; `limit` capped at 200 |
+| `POST /sales/:id/payment-link` | vendor, to share a sale by WhatsApp or QR | `{ phone?, lang? }`: phone with country code, `es` (default) or `en` | 200 | `PaymentLinkView`: `code`, `url` (the web page, also the QR content), `appUrl` (`<APP_SCHEME>://pay/<code>`), `qrSvgUrl`, `whatsappUrl` (`wa.me`, to `phone` when given) and `message`, `expiresAt`; the same code while it is live, a new one once it expired; only for an `AWAITING_TAP` sale |
+| `GET /pay/:code` | buyer's payment screen | | 200 | `PaymentRequestView`: vendor name, amount, `description`, `status`, `expiresAt`, `expired`; never wallet URLs |
+| `POST /pay/:code/charge` | buyer's payment screen | `{ walletAddress }`, a URL | 200 | as `POST /sales/:id/charge`, the same rules and orchestration, with `chargedVia: LINK`; `410` once the link expired |
 | `GET /debug/wallets` | `/debug` | | 200 | `DebugWallets`: the client address, then every buyer wallet and every vendor wallet (one entry per wallet, under its owner's name), each resolved live (`reachable`, asset, wallet's `error`, buyer `hasGrant`); never throws, never returns a token |
 
 **Views** (built in the service's `src/services/views.ts`, mirrored in the app's `src/api/types.ts`)
@@ -384,6 +387,8 @@ Nineteen JSON endpoints on port 4000, one envelope, no authentication. Every res
 | `WALLET_UNREACHABLE` | 400 | the wallet address document could not be read when adding it; the message is the wallet's |
 | `LAST_WALLET` | 409 | removing a buyer's or a vendor's only wallet |
 | `SALE_NOT_CHARGEABLE` | 409 | sale not `AWAITING_TAP` (*Sale is PAID*), or another request claimed it first (*Sale was already taken*) |
+| `PAYMENT_LINK_NOT_FOUND` | 404 | unknown or replaced payment-link code |
+| `PAYMENT_LINK_EXPIRED` | 410 | charging a payment link after its `expiresAt` |
 | `INTERNAL` | 500 | anything unexpected, logged as *Unexpected error* |
 
 Exact validation messages: `amount must be digits in the smallest unit, got "12.50"`, `amount must be greater than zero`, `perPaymentLimit must be ≤ dailyLimit`, `Invalid JSON body`, `walletAddress: Invalid URL`, `Buyer <id> not found`, `Wallet <walletId> not found for buyer <id>` (or `for vendor <id>`), `Wallet <url> is already registered`, `A buyer keeps at least one wallet`, `A vendor keeps at least one wallet`.
@@ -472,6 +477,15 @@ Any wallet error between the claim and the outgoing payment, and a `4xx` on the 
 
 Rule refusals of a registered wallet appear in its buyer's history as `FAILED` with their `failureCode`, so the buyer app can show the tap was declined; `BUYER_UNKNOWN` ones carry no buyer. Only `CHARGING` and `PAID` count toward the day, by the sale's creation day.
 
+**Payment links and QR**: a second way to reach the charge of a sale, for a buyer who is not at the terminal or does not tap.
+
+1. The vendor creates the sale as usual (`POST /sales`, optionally with a `description`), then asks for its link (`POST /sales/:id/payment-link`). The service stores a random 12-character `payCode` (72 bits) and `payCodeExpiresAt` (`PAYMENT_LINK_TTL_MINUTES`, default 24 h) on the sale. The link never carries the sale id.
+2. The vendor shares it: WhatsApp opens with the message written (vendor, amount, description, link, expiry), or the phone shows the QR, whose content is the same `url`.
+3. The buyer opens the link. `GET /p/:code` is a small web page: the preview WhatsApp shows, the amount, and a button to `<APP_SCHEME>://pay/<code>`, which opens the app's payment screen. Paid or expired links say so, without the button.
+4. The app reads `GET /pay/:code`, the buyer confirms, and the app calls `POST /pay/:code/charge` with the paying wallet's address. From there it is steps 3 to 9 above, unchanged: rules, conditional claim, incoming payment, quote, outgoing payment, confirmation. The sale records `chargedVia: LINK`; a tap records `NFC`.
+
+The sale is still chargeable by tap while its link is live, and whichever channel claims it first wins (the conditional claim); the other gets `409`. A refused charge ends the sale `FAILED` as a refused tap does, so the vendor creates a new sale and link. Links are built on `PUBLIC_BASE_URL`, else on the host of the request that created them, which must be reachable from the buyer's phone; the WhatsApp preview only appears for a public URL.
+
 **Resolving a stuck `CHARGING` sale**: read `outgoingPaymentUrl` and `incomingPaymentUrl` from the row, check both in the Test Wallet, then `UPDATE "Sale" SET status = 'PAID', "paidAt" = now() WHERE id = $1` or `SET status = 'FAILED', "failureCode" = 'MANUAL', "failureMessage" = '…'`.
 
 ## 11. Security and trust boundaries
@@ -529,6 +543,9 @@ Each app reads one `.env`, git-ignored, copied from a committed `.env.example`. 
 | `SEED_PER_PAYMENT_LIMIT`, `SEED_DAILY_LIMIT` | `2000`, `5000` | in the wallet's smallest unit; with scale 2 that is 20.00 and 50.00 of whatever asset the wallet has; also the caps of any wallet added without its own (`POST /buyers/:id/wallets`, `add:wallet`, `add:buyer`) |
 | `DAILY_LIMIT_TZ` | `America/Bogota` | the calendar day for the daily cap; not validated at startup |
 | `CHARGE_POLL_SECONDS` | `8` | how long a charge request waits for the payment to land |
+| `PUBLIC_BASE_URL` | none | the base of payment links (`http://<laptop-LAN-IP>:4000` or the deployed https URL); without it a link uses the host of the request that created it |
+| `PAYMENT_LINK_TTL_MINUTES` | `1440` | how long a payment link can be charged |
+| `APP_SCHEME` | `taptopayapp` | the app's URL scheme (`app.json` `scheme`); the link page opens `<scheme>://pay/<code>` |
 
 `loadConfig` validates all of it with one zod schema and names the missing variable in its error.
 

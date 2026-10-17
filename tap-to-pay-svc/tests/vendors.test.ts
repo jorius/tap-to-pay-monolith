@@ -166,6 +166,8 @@ describe('listVendorSales', () => {
       debitAssetScale: null,
       failureCode: 'BUYER_UNKNOWN',
       failureMessage: 'Card not registered',
+      description: null,
+      chargedVia: null,
       createdAt: '2026-10-14T14:00:00.000Z',
       paidAt: null,
       buyerName: null,

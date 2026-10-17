@@ -26,6 +26,8 @@ export function saleView(sale: SaleRow, vendorName?: string): SaleView {
     debitAssetScale: sale.debitAssetScale,
     failureCode: sale.failureCode,
     failureMessage: sale.failureMessage,
+    description: sale.description,
+    chargedVia: sale.chargedVia as SaleView['chargedVia'],
     createdAt: sale.createdAt.toISOString(),
     paidAt: sale.paidAt ? sale.paidAt.toISOString() : null,
   };
