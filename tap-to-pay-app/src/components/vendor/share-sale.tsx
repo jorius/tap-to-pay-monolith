@@ -1,15 +1,16 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Image } from 'expo-image';
 import { useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, Share, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Linking, Modal, Pressable, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { apiUrl } from '@/api/client';
+import { BigButton } from '@/components/big-button';
 import { StatusPill } from '@/components/status-pill';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { vendorCopy } from '@/components/vendor/copy';
 import { errorText, fill, time } from '@/components/vendor/format';
-import { roleColors } from '@/constants/theme';
+import { Fill, roleColors } from '@/constants/theme';
 import { usePaymentLink } from '@/hooks/use-payment-link';
 import { useTheme } from '@/hooks/use-theme';
 import { defineCopy, useCopy, useLang } from '@/i18n';
@@ -18,7 +19,8 @@ const copy = defineCopy(
   {
     or: 'O cóbralo sin NFC',
     qr: 'Mostrar QR',
-    hideQr: 'Ocultar QR',
+    qrTitle: 'Escanea para pagar',
+    close: 'Cerrar',
     whatsapp: 'WhatsApp',
     share: 'Compartir',
     scan: 'El cliente lo escanea desde la app: Tarjeta → Pagar con QR o link',
@@ -33,7 +35,8 @@ const copy = defineCopy(
   {
     or: 'Or charge it without NFC',
     qr: 'Show QR',
-    hideQr: 'Hide QR',
+    qrTitle: 'Scan to pay',
+    close: 'Close',
     whatsapp: 'WhatsApp',
     share: 'Share',
     scan: 'The customer scans it in the app: Card → Pay with a QR or link',
@@ -48,8 +51,9 @@ const copy = defineCopy(
 );
 
 // While a sale waits for a tap, the vendor can also show it as a QR or send its link by WhatsApp or any other app. The
-// terminal keeps watching the sale, so a payment through the link ends on the same Paid screen as a tap.
-export function ShareSale({ saleId }: { saleId: string }) {
+// terminal keeps watching the sale, so a payment through the link ends on the same Paid screen as a tap; this component
+// then unmounts, which also closes the QR modal. `amount` is the sale's amount as the terminal shows it.
+export function ShareSale({ saleId, amount }: { saleId: string; amount: string }) {
   const theme = useTheme();
   const lang = useLang();
   const t = useCopy(copy);
@@ -59,8 +63,7 @@ export function ShareSale({ saleId }: { saleId: string }) {
   const [showQr, setShowQr] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const toggleQr = async () => {
-    if (showQr) return setShowQr(false);
+  const openQr = async () => {
     if (await ensure()) setShowQr(true);
   };
 
@@ -99,7 +102,7 @@ export function ShareSale({ saleId }: { saleId: string }) {
     <ThemedView card>
       <ThemedText type="caption">{t.or}</ThemedText>
       <View style={styles.row}>
-        <Action icon="qrcode" label={showQr ? t.hideQr : t.qr} color={colors.ink} onPress={toggleQr} />
+        <Action icon="qrcode" label={t.qr} color={colors.ink} onPress={openQr} />
         <Action icon="whatsapp" label={t.whatsapp} color={colors.ink} onPress={whatsapp} />
         <Action icon="share-variant" label={t.share} color={colors.ink} onPress={share} />
       </View>
@@ -135,19 +138,34 @@ export function ShareSale({ saleId }: { saleId: string }) {
       {loading && <ActivityIndicator color={colors.brand} />}
       {error && <StatusPill tone="bad" label={errorText(error, v.network)} />}
       {notice && <ThemedText type="caption">{notice}</ThemedText>}
-      {showQr && link && (
-        <View style={styles.qrBox}>
-          {/* The vendor's phone always reaches the service at apiUrl; the QR's content is the shareable link. */}
-          <Image
-            source={{ uri: `${apiUrl}/pay/${link.code}/qr.svg` }}
-            style={styles.qr}
-            contentFit="contain"
-            accessibilityLabel={link.url}
-          />
-          <ThemedText type="caption" style={styles.center}>
-            {t.scan}
-          </ThemedText>
-        </View>
+      {link && (
+        <Modal visible={showQr} transparent animationType="fade" onRequestClose={() => setShowQr(false)}>
+          <Pressable style={styles.backdrop} onPress={() => setShowQr(false)} accessibilityLabel={t.close}>
+            {/* A tap inside the card does not close it; only the backdrop and Close do. */}
+            <Pressable accessibilityViewIsModal style={[styles.sheet, { backgroundColor: theme.background }]}>
+              <Text style={[styles.qrTitle, { color: theme.text }]}>{t.qrTitle}</Text>
+              <Text style={[styles.qrAmount, { color: theme.text }]}>{amount}</Text>
+              <View style={styles.qrBox}>
+                {/* The vendor's phone always reaches the service at apiUrl; the QR's content is the shareable link. */}
+                <Image
+                  source={{ uri: `${apiUrl}/pay/${link.code}/qr.svg` }}
+                  style={styles.qr}
+                  contentFit="contain"
+                  accessibilityLabel={link.url}
+                />
+              </View>
+              <ThemedText type="caption" style={styles.center}>
+                {t.scan}
+              </ThemedText>
+              <ThemedText type="caption" style={styles.center}>
+                {fill(t.expires, { time: time(link.expiresAt, lang) })}
+              </ThemedText>
+              <View style={styles.close}>
+                <BigButton label={t.close} color={Fill.vendor} onPress={() => setShowQr(false)} />
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
       )}
       {link && (
         <ThemedText type="caption" style={styles.center}>
@@ -203,8 +221,13 @@ const styles = StyleSheet.create({
   },
   actionLabel: { fontSize: 14, fontWeight: '700' },
   // White behind the code in dark mode too, so any camera reads it.
-  qrBox: { alignItems: 'center', gap: 8, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16 },
-  qr: { width: 240, height: 240 },
+  backdrop: { flex: 1, justifyContent: 'center', padding: 24, backgroundColor: 'rgba(0, 0, 0, 0.6)' },
+  sheet: { alignItems: 'center', gap: 10, borderRadius: 24, padding: 24 },
+  qrTitle: { fontSize: 22, fontWeight: '800', textAlign: 'center' },
+  qrAmount: { fontSize: 32, lineHeight: 40, fontWeight: '800', fontVariant: ['tabular-nums'], textAlign: 'center' },
+  qrBox: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16 },
+  qr: { width: 260, height: 260 },
+  close: { alignSelf: 'stretch', marginTop: 4 },
   center: { textAlign: 'center' },
   input: { flex: 1, minHeight: 52, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, fontSize: 17 },
   send: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 12, paddingHorizontal: 16, minHeight: 52 },

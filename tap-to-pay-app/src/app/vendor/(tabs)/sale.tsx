@@ -189,7 +189,7 @@ function Terminal({ vendor, reload }: { vendor: VendorView; reload: () => Promis
               </ThemedText>
             </>
           )}
-          {sale.sale && <ShareSale saleId={sale.sale.id} />}
+          {sale.sale && <ShareSale saleId={sale.sale.id} amount={saleAmount} />}
           {debugLabels && <SimulateTap onTap={sale.tap} />}
           <BigButton label={t.cancel} color={colors.ink} ghost onPress={sale.reset} />
         </>
