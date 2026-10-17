@@ -1,24 +1,28 @@
-Session: payment links by WhatsApp and QR, and the merge with feat/qr-whatsapp-pay (Claude Code, Claude Opus 5.5), Oct 16–17, 2026.
+Read SDD.md sections 7–12 and the current code of tap-to-pay-svc and tap-to-pay-app. Add two ways to pay a sale besides the NFC tap: a payment link the vendor sends by WhatsApp, and a QR the buyer scans. Both reach the same charge as a tap, so the grant, the caps and the cross-asset rules apply unchanged. Keep the NFC flow working.
 
-Context given before these prompts: the team's repo (SDD.md, tap-to-pay-svc, tap-to-pay-app) on main, with multi-wallet buyers and vendors already merged.
+1. Payment links (service)
+- A sale waiting for a tap (AWAITING_TAP) can also be charged through its payment link. POST /sales/:id/payment-link returns the link for that sale: a random 12-character code, never the sale id, which expires after PAYMENT_LINK_TTL_MINUTES (24 h by default). It returns the same code while the link is live, and a new one once it expired.
+- The response carries the public url (also the QR's content), the app link (<APP_SCHEME>://pay/<code>), the QR as an SVG (GET /pay/:code/qr.svg), a wa.me URL and the WhatsApp message. With a phone number, WhatsApp opens straight in that chat.
+- The message reads well on WhatsApp: who charges, the amount in the local money format, the description, a reference, the date, the link on its own line, when it expires, how to pay in three steps, and a safety note. Spanish by default, English on request.
+- GET /pay/:code shows the buyer the charge (vendor, amount, description, status, expiry) without wallet URLs. POST /pay/:code/charge charges it with the paying wallet's address through chargeSale; an expired link is a 410.
+- GET /p/:code is a small web page with a WhatsApp preview. It lets the buyer:
+  - pay in the browser with no app, typing their wallet address (a payment pointer is accepted, and the phone remembers it);
+  - or open the app;
+  - or copy the code with a Copy button that still works on plain-http links.
+  A paid or expired link says so.
+- Sales gain description (up to 140 characters, set on POST /sales) and chargedVia (NFC or LINK). Add the migration.
+- Build links on PUBLIC_URL, else on the request that created them, honouring x-forwarded-proto and x-forwarded-host.
+- A sale can still be tapped while its link is live: whichever channel claims it first wins, and the other gets a 409.
 
-Prompts (verbatim, Spanish, in order):
+2. App
+- Vendor terminal, while a sale waits for a tap:
+  - Show QR, in a modal;
+  - WhatsApp to a typed number (a 10-digit Colombian mobile gets +57) or to any contact;
+  - Share, through any app.
+- The terminal re-reads the waiting sale every 2 s, so a payment through the link ends on the same Paid screen as a tap.
+- A vendor phone without NFC, or with NFC off, can still create sales and share them.
+- Buyer: "Pay with a QR or link" on the Card tab scans the QR with the camera or takes a pasted link. The payment screen pays with one of the buyer's authorized wallets. The app link <scheme>://pay/<code> opens the same screen.
 
-1. bueno necesito hagas las sigueintes funcionaliadades(aun no toques el frnot porqe no es definitico y puede que cambien algunas cosas),
-   1. enviar un link de pago a wpp con los datos importantes que debe saber el comprador de la transaccion, no se si lo lleva a la app a la oantalll apra realizar el pago
-   2. y lo anterior creo que tambien se combina con lo este qeu es también poder permitir hcacer el pago pero con codigo qr
-   primero geera un plan y luego codeas
-2. creo que puedes añadirlo al front para que yo pueda probarlo hazo por favrp
-3. pero y si quiero envoar el link a la perons con solo poner le numero?
-4. pero mejora que no solo se envie el link hax un mensaje mas detallado,
-5. de tdos mdos noa brio vuelve a la base original com estba, pero si deja el el codigo ppara copiarlo pero que hay aun botonque me permita coparlo
-6. pero que el mostar qr sea un modal
-7. necesito que ahora tomes los mejor de estos dos cambios feat/qr-whatsapp-pay, y lo que hay en esta rama que hizo de acuerdo a ultimo desarrollo para usar esos nuevos metodos de pago, crea un nuevo pr para eso, en una nueva rama
+Rules: never expose wallet URLs or tokens in a link, page or message; mark as shortcut: that whoever holds a link can charge it to any registered wallet address, the same trust model as a forged card. Update .env.example, SDD sections 9, 10 and 12, and AI_USAGE.md.
 
-What was built (branch feat/payment-links, then merged with feat/qr-whatsapp-pay into feat/payments-qr-whatsapp):
-- Service: a sale AWAITING_TAP can also be charged through a payment link. POST /sales/:id/payment-link returns a random 12-character code (never the sale id) that expires after PAYMENT_LINK_TTL_MINUTES, the link, the app link, the QR (GET /pay/:code/qr.svg), a wa.me URL and a detailed WhatsApp message (amount in the local format, description, reference, date, expiry, how to pay, a safety note), optionally to a phone number. GET /pay/:code and POST /pay/:code/charge reuse chargeSale unchanged; sales gain description, payCode, payCodeExpiresAt and chargedVia (NFC or LINK).
-- From feat/qr-whatsapp-pay: the link page GET /p/:code also lets the buyer pay in the browser, with no app, by typing their wallet address (remembered on the phone); PUBLIC_URL (proxy headers honoured when unset); the vendor creates sales on a phone without NFC; tunnel headers on the QR image.
-- App: the vendor terminal shows the QR in a modal, sends the link by WhatsApp to a typed number or any contact, shares it, and follows a sale paid through the link. The buyer has "Pay with a QR or link" (camera scanner or pasted link) and a payment screen that pays with one of their authorized wallets.
-- Prompt 5 reverted an attempt (APP_LINK_BASE, to open Expo Go from the page) and kept the code with a Copy button instead.
-
-Verification: npm run typecheck and npm test in tap-to-pay-svc (158 tests green); tsc, expo lint and an iOS export of tap-to-pay-app. Checked against the local Postgres and service: link creation, the page, the QR. A real charge through the link page or the app was not run in this session.
+Tests: the link, its code and expiry; the WhatsApp message, the phone number and English; a charge through the link that ends PAID with chargedVia LINK, its refusals and the 410; a tap and the link at the same instant creating one outgoing payment; the page escaping what the vendor typed, the browser form and the Copy button; the QR as SVG; proxy headers. Finish with npm run typecheck and npm test green in tap-to-pay-svc, and tsc and expo lint clean in tap-to-pay-app.
