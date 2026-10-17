@@ -1,0 +1,1 @@
+okay, now it's showing up when reading each other nfc module the same dialog with two different options Select an app to use and gives me two options "share your x profile by holding..." and "embedded tag"

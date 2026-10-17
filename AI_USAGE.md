@@ -14,7 +14,6 @@ State as of 2026-10-16, commit `5ce21db`. AI helped with every file of code in t
 | --- | --- | --- |
 | `SDD.md` | Claude Code | Edited during the event from our design: Mermaid architecture diagram, two-folder layout, multi-wallet and cross-asset sections |
 | `CORE_FEATURES.md` | Claude | Review of an existing payments app and the SoftPOS product proposal |
-| `tap-to-pay-svc/` and `tap-to-pay-app/` scaffolds | Claude Code | Generated from `prompts/RAW_initial_prompt.txt` |
 | `tap-to-pay-app/src/app/` (welcome, role picker, vendor and buyer tabs, debug) | Claude Code | Screens and navigation generated, then redesigned for UI/UX |
 | `tap-to-pay-app/src/components/`, `src/constants/theme.ts` | Claude Code | Components and theme generated: keypad, sale sheet, charts, payment feedback, status pills, wallet panels |
 | `tap-to-pay-app/src/hooks/`, `src/api/`, `src/i18n/` | Claude Code | The sale state machine, session, API client and translations generated |
@@ -38,11 +37,11 @@ State as of 2026-10-16, commit `5ce21db`. AI helped with every file of code in t
 
 The exact text of the coding prompts we kept as files is in [`prompts/`](prompts/):
 
-- [`RAW_initial_prompt.txt`](prompts/RAW_initial_prompt.txt): SDD changes and scaffolding for both folders.
 - [`backend-service.txt`](prompts/backend-service.txt): the build prompt for the first version of the service.
 - [`remove-asset-mismatch.txt`](prompts/remove-asset-mismatch.txt): accept sales between wallets in different assets.
 
 Commits made with Claude Code that carry the trailer `Co-Authored-By: Claude …` are listed by `git log --grep "Co-Authored-By: Claude"`.
+The exact text of every coding prompt is in [`prompts/`](prompts/), one file per prompt, numbered in the order it was sent. See [prompts/README.md](prompts/README.md) for the format.
 
 ## How we reviewed AI output
 

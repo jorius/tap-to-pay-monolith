@@ -1,0 +1,4 @@
+ Let me handle the commits and push manually, now, a couple of things to continue with:
+
+  - I am copy and pasting manually the prompts and saving them into prompts folder, however, I want you to take care of that, keep them RAW and as .txt files, stack them into the prompts folder after each prompt iteration
+  - Let's build only the UI/UX skeleton in the tap-to-pay-app repository, let me also handle installing manually the .apk in my device

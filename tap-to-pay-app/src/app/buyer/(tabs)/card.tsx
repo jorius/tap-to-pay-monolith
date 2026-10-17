@@ -53,8 +53,6 @@ const copy = defineCopy(
     shownPays: 'Mientras la veas aquí, los toques pagan con esta billetera. Con la app cerrada o en otra pantalla paga la predeterminada.',
     paysDefault: 'Sin autorización: los toques pagan con tu billetera predeterminada.',
     leftToday: 'Disponible hoy',
-    usedAria: 'Usado hoy',
-    used: (spent: string, daily: string) => `${spent} de ${daily} usados · se reinicia a medianoche (Bogotá)`,
     authorized: 'Autorizado en tu billetera',
     perDay: (limit: string, left: string) => `${limit} por día · quedan ${left}`,
     noCap: 'Sin tope de monto en la autorización · el servicio aplica tus topes.',
@@ -102,8 +100,6 @@ const copy = defineCopy(
     shownPays: 'While you see it here, taps pay with this wallet. With the app closed or on another screen, the default one pays.',
     paysDefault: 'Not authorized: taps pay with your default wallet.',
     leftToday: 'Left today',
-    usedAria: 'Used today',
-    used: (spent: string, daily: string) => `${spent} of ${daily} used · resets at midnight (Bogotá)`,
     authorized: 'Authorized in your wallet',
     perDay: (limit: string, left: string) => `${limit} per day · ${left} left`,
     noCap: 'No amount cap in the authorization · the service applies your limits.',
@@ -305,7 +301,6 @@ function Cards({ name, wallets, defaultWallet, setDefault, addWallet, removeWall
       )}
       {simulating && <StatusPill tone="wait" label={t.simulated} />}
 
-      <LeftToday wallet={wallet} />
       <Authorized wallet={wallet} />
       <ThemedView card>
         <ThemedText type="caption" style={styles.sectionLabel}>
@@ -350,17 +345,30 @@ function Cards({ name, wallets, defaultWallet, setDefault, addWallet, removeWall
 
 function CardFace({ name, wallet, width, active }: { name: string; wallet: BuyerWalletView; width: number; active: boolean }) {
   const t = useCopy(copy);
+  const left = formatMoney(wallet.remainingToday, wallet.assetScale, wallet.assetCode, useLang());
   return (
     <View style={{ width }}>
       <View
         accessible
-        accessibilityLabel={[t.walletLabel(wallet.assetCode), name, wallet.isDefault && t.defaultBadge, (active || wallet.isDefault) && (active ? t.on : t.off)]
+        accessibilityLabel={[
+          t.walletLabel(wallet.assetCode),
+          `${t.leftToday} ${left}`,
+          name,
+          wallet.isDefault && t.defaultBadge,
+          (active || wallet.isDefault) && (active ? t.on : t.off),
+        ]
           .filter(Boolean)
           .join(', ')}
         style={[styles.card, { backgroundColor: wallet.isDefault ? Fill.buyer : Brand.postgres }]}>
         <View style={styles.cardRow}>
           <Text style={styles.cardLabel}>{t.walletLabel(wallet.assetCode)}</Text>
           <MaterialCommunityIcons name="contactless-payment" size={32} color="#FFFFFF" />
+        </View>
+        <View>
+          <Text style={styles.cardCaption}>{t.leftToday}</Text>
+          <Text style={styles.cardAmount} numberOfLines={1}>
+            {left}
+          </Text>
         </View>
         <Text style={styles.cardWallet} numberOfLines={1}>
           {wallet.walletAddress.replace(/^https?:\/\//, '')}
@@ -387,35 +395,6 @@ function CardFace({ name, wallet, width, active }: { name: string; wallet: Buyer
   );
 }
 
-function LeftToday({ wallet }: { wallet: BuyerWalletView }) {
-  const theme = useTheme();
-  const t = useCopy(copy);
-  const lang = useLang();
-  const daily = Number(wallet.dailyLimit);
-  // Display only: a float is fine for a bar width, never for the amounts themselves.
-  const used = daily > 0 ? Math.min(1, Number(wallet.spentToday) / daily) : 0;
-  const plain = formatMoney(wallet.spentToday, wallet.assetScale, '', lang).trimEnd();
-  return (
-    <ThemedView card>
-      <ThemedText type="caption" style={styles.sectionLabel}>
-        {t.leftToday}
-      </ThemedText>
-      <Text style={[styles.big, { color: theme.text }]}>
-        {formatMoney(wallet.remainingToday, wallet.assetScale, wallet.assetCode, lang)}
-      </Text>
-      <View
-        accessibilityRole="progressbar"
-        accessibilityLabel={t.usedAria}
-        accessibilityValue={{ min: 0, max: 100, now: Math.round(used * 100) }}
-        style={[styles.track, { backgroundColor: theme.border }]}>
-        <View style={[styles.bar, { width: `${used * 100}%` }]} />
-      </View>
-      <ThemedText type="caption">
-        {t.used(plain, formatMoney(wallet.dailyLimit, wallet.assetScale, wallet.assetCode, lang))}
-      </ThemedText>
-    </ThemedView>
-  );
-}
 
 // What the wallet's consent allows per day; a wallet without a grant shows the command that gives one.
 function Authorized({ wallet }: { wallet: BuyerWalletView }) {
@@ -521,9 +500,11 @@ function LimitField({ label, digits, wallet, onChange }: LimitFieldProps) {
 }
 
 const styles = StyleSheet.create({
-  card: { height: 168, borderRadius: 20, paddingVertical: 18, paddingHorizontal: 20, justifyContent: 'space-between' },
+  card: { height: 188, borderRadius: 20, paddingVertical: 18, paddingHorizontal: 20, justifyContent: 'space-between' },
   cardRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
   cardLabel: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  cardCaption: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
+  cardAmount: { color: '#FFFFFF', fontSize: 28, lineHeight: 34, fontWeight: '800', fontVariant: ['tabular-nums'] },
   cardWallet: { color: '#FFFFFF', fontSize: 12.5, fontFamily: 'monospace' },
   cardName: { flexShrink: 1, color: '#FFFFFF', fontSize: 18, fontWeight: '800' },
   cardChips: { flexDirection: 'row', gap: 6 },
@@ -537,9 +518,6 @@ const styles = StyleSheet.create({
   sectionLabel: { fontWeight: '700' },
   strong: { fontWeight: '700' },
   command: { fontFamily: 'monospace', fontSize: 12.5, lineHeight: 18, padding: 10, borderRadius: 10 },
-  big: { fontSize: 36, lineHeight: 42, fontWeight: '800' },
-  track: { height: 10, borderRadius: 5, overflow: 'hidden' },
-  bar: { height: 10, borderRadius: 5, backgroundColor: Brand.buyer },
   field: { gap: 6 },
   fieldLabel: { fontSize: 14, fontWeight: '600' },
   inputBox: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 2, borderRadius: 12, paddingHorizontal: 14 },

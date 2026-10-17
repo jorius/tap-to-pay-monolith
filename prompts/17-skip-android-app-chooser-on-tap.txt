@@ -1,0 +1,1 @@
+When taping each other phone I always get a dialog in the buyer one saying "select and app to use", can we skip this dialog and transmit the information anyway directly from the compiled apk running to the other one

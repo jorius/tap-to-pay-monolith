@@ -1,0 +1,1 @@
+Okay, I rebuild both, however, the vendor one is always telling me that NFC is off and the NfcTap isn't installed, when I click on "usar este teléfono como mi tarjeta" in the buyer one the button just got disabled and nothing happened

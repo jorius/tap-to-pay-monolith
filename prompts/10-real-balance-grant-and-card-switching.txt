@@ -1,0 +1,5 @@
+ Can we display the real account money and the granted one?
+
+  The HCE activa chip/label should be right beside the "Este teléfono es tu tarjeta"
+  We should also allow the user to swap between N cards/accounts in the Tarjeta screen
+  We should have a button like "set default"

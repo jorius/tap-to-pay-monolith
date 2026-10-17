@@ -1,0 +1,1 @@
+Can we add support to compile the apk with a https API URL that's a port forwarding so I can test it out

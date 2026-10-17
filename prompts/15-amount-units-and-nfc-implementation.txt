@@ -1,0 +1,1 @@
+Why 5000 equals 50.00? Let's continue only with the NFC implementation

@@ -1,0 +1,11 @@
+Okay, let's now improve the UI/UX with a couple of things along with organizing better the raw prompts in the prompts folder so:
+
+UI/UX:
+
+- There's duplicate labels for "pagado" in the success confirmation after a payment is done.
+- There's no feedback for the buyer to know if the pay was successfull or not.
+- We should allow the user to refresh each screen with a swipe down gesture in order to update amount available and other amount and value variables
+- Let's drop those "pagas en USD el comercio recibe en COP" stuff labels from everywhere
+- As a buyer, with the app open I should be able to pay with the shown card from the "Tarjeta" screen, otherwise, default one should be the fall back
+- Let's use public information from the wallet in order to display buyer/vendor name
+- Cobrar screen should have a couple more buttons such as: "limpiar" in order to put the current value to 0 and it should display some pre-defined "cobros" such as 5, 10,15, etc... in the currency selected by the user

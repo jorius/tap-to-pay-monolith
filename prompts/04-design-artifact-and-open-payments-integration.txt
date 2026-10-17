@@ -1,0 +1,12 @@
+With a sub-agent, let's create a Figma alike Artifact where we will mock a complete tap-to-pay-app design including some features from CORE_FEATURES file, such as:
+
+- Wallet/currency management for both type of users (vendor, buyer)
+- Based on environment variables the .apk built within the available devices must behave only in one way (Vendor Terminal or Buyer Card)
+- The Vendor Terminal should include Dashboard/Balance PL (Let's also add Spanish Support and make Spanish the default language for builds no matter the default system language), transactions, wallet/currency
+- Show currency availability within wallets for both type of users
+- Welcome page
+
+With other agent/sub-agent let's now build the Open Payment integration from the SDD along with a complete debug built-in tool labels such as:
+
+- A label to check if the apps are connected to the service.
+- Real test interledger wallets/currency/accounts connected.
