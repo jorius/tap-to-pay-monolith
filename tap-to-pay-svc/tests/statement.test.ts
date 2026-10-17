@@ -114,6 +114,70 @@ describe('buildStatement', () => {
   });
 });
 
+describe('payment capacity', () => {
+  it("adds the vendor's recurring payments month by month: obligations, net flow, punctuality", async () => {
+    const ctx = setup();
+    const payer = ctx.repo.addBuyer({ name: 'Tienda · pagos', wallet: { walletAddress: 'https://ilp.test/tienda' } });
+    await ctx.repo.setVendorPayer(ctx.vendor.id, payer.id);
+    const epm = ctx.repo.addVendor({ name: 'EPM', kind: 'BILLER', wallet: { walletAddress: 'https://ilp.test/epm' } });
+    const bill = (iso: string, status: 'PAID' | 'FAILED', amount = 500n) =>
+      ctx.repo.addSale({
+        vendorId: epm.id,
+        buyerId: payer.id,
+        buyerWalletId: payer.wallet.id,
+        status,
+        amount,
+        debitAmount: status === 'PAID' ? amount : null,
+        debitAssetCode: status === 'PAID' ? 'USD' : null,
+        chargedVia: 'RECURRING',
+        description: 'EPM · 123456 · pago recurrente',
+        failureCode: status === 'FAILED' ? 'WALLET_ERROR' : null,
+        createdAt: at(iso),
+      });
+    bill('2026-09-03T08:00:00', 'PAID');
+    bill('2026-10-03T08:00:00', 'PAID', 1000n);
+    bill('2026-08-03T08:00:00', 'FAILED');
+    // A purchase the payer made with a tap is not an obligation.
+    ctx.repo.addSale({ vendorId: epm.id, buyerId: payer.id, buyerWalletId: payer.wallet.id, status: 'PAID', amount: 999n, debitAmount: 999n, debitAssetCode: 'USD', createdAt: at('2026-10-04T08:00:00') });
+
+    const [w] = (await buildStatement(ctx.deps, ctx.vendor.id, { year: 2026, month: 10 })).wallets;
+    const c = w.capacity;
+    expect(c.months.map((m) => [m.month, m.income, m.obligationsPaid, m.obligationsMissed, m.net])).toEqual([
+      ['2026-05', 0n, 0n, 0, 0n],
+      ['2026-06', 0n, 0n, 0, 0n],
+      ['2026-07', 9000n, 0n, 0, 9000n],
+      ['2026-08', 0n, 0n, 1, 0n],
+      ['2026-09', 8000n, 500n, 0, 7500n],
+      ['2026-10', 12000n, 1000n, 0, 11000n],
+    ]);
+    // From July, the first month with income: 4 months.
+    expect(c).toMatchObject({
+      historyMonths: 4,
+      averageIncome: 7250n,
+      minimumIncome: 0n,
+      averageObligations: 375n,
+      estimatedCapacity: 6875n,
+      punctuality: { paid: 2, missed: 1 },
+    });
+    expect(c.punctuality.rate).toBeCloseTo(2 / 3);
+    expect(c.obligationRatio).toBeCloseTo(375 / 7250);
+    // 9000, 0, 8000 and 12000: a month without income makes it unsteady.
+    expect(c.variation).toBeCloseTo(0.612, 2);
+    expect(c.stability).toBe('low');
+    expect(w.obligations).toEqual([
+      { date: at('2026-10-03T08:00:00'), payee: 'EPM', reference: '123456', amount: 1000n, assetCode: 'USD', assetScale: 2, status: 'PAID' },
+    ]);
+  });
+
+  it('has no history before the first month with income, nor obligations without a payer', async () => {
+    const ctx = setup();
+    // September 2025 to February 2026: before any sale.
+    const [w] = (await buildStatement(ctx.deps, ctx.vendor.id, { year: 2026, month: 2 })).wallets;
+    expect(w.capacity).toMatchObject({ historyMonths: 0, averageIncome: 0n, variation: null, stability: null, punctuality: { rate: null } });
+    expect(w.obligations).toEqual([]);
+  });
+});
+
 describe('GET /vendors/:id/statement.pdf', () => {
   it('answers the PDF, and JSON errors for a bad month or vendor', async () => {
     const ctx = setup();

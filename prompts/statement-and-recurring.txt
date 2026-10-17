@@ -44,45 +44,82 @@
 
 
 ──────────────────────────────────────────────────────────────────────────────
+  CORRECCIÓN  (segundo prompt, tal cual se envió)
+──────────────────────────────────────────────────────────────────────────────
+
+  pero quien debe tenere los pagos recurrentes es el comercio, porque a el es
+  quein a esto le va aservir para generar un historial crediticio, que para eso
+  tambien es el resumen pdf del mes, porque veo que en realidad no incluiste
+  datos relevantes para que pueda demostrar capcdad de pago mes a mes, ajustalo
+
+  En limpio:
+     · Los pagos recurrentes son del comercio, no del comprador: pagar a tiempo
+       sus servicios es lo que construye su historial crediticio.
+     · El PDF debe demostrar capacidad de pago mes a mes.
+
+
+──────────────────────────────────────────────────────────────────────────────
   QUÉ SE CONSTRUYÓ
 ──────────────────────────────────────────────────────────────────────────────
 
-  Resumen mensual en PDF
+  Resumen financiero mensual en PDF
   ▸ GET /vendors/:id/statement.pdf?month=AAAA-MM&lang=es|en  (pdfkit 0.20.2)
-  ▸ Una hoja A4 por billetera que recibe, con:
-      ingresos · ventas aprobadas · ticket promedio y mediano · venta más alta
-      clientes únicos y que repitieron · tasa de aprobación · rechazos por motivo
-      variación frente al mes anterior · días con ventas · mejor día · hora pico
-      canales (NFC, link o QR, recurrente) · pendientes de confirmar
-      gráfica de ingresos por día · tendencia de 6 meses
-      código de verificación y aviso: no es un certificado bancario
-  ▸ App: tarjeta "Resumen del mes en PDF" en Movimientos, con el mes
-    (este o los dos anteriores) y el botón Descargar PDF.
+  ▸ Dos hojas A4 por billetera que recibe:
 
-  Pagos recurrentes
+    Hoja 1 · Capacidad de pago (últimos 6 meses)
+      ingreso mensual promedio y del mes más bajo · estabilidad de ingresos
+      obligaciones mensuales promedio · obligaciones sobre ingresos
+      capacidad de pago estimada por mes
+      tabla mes a mes: ingresos, ventas, días, obligaciones, flujo neto,
+        pagos al día
+      gráfica de ingresos frente a obligaciones
+      historial de pagos: pagos a tiempo de los que vencieron, crecimiento
+      obligaciones del mes: fecha, servicio, referencia, monto, estado
+
+    Hoja 2 · Ventas del mes
+      ingresos · ventas aprobadas · ticket promedio y mediano · clientes
+      tasa de aprobación y rechazos · frente al mes anterior · mejor día
+      hora pico · canales · ingresos por día · tendencia de 6 meses
+
+    En cada hoja: código de verificación y aviso de que no es un
+    certificado bancario.
+  ▸ App: tarjeta "Resumen del mes en PDF" en Movimientos (vendedor).
+
+  Pagos recurrentes del comercio
+  ▸ Pestaña "Pagos" en el menú del vendedor.
   ▸ Catálogo: EPM, Claro, Tigo, Movistar, ETB y Vanti, como insignias con el
     color y las iniciales de cada marca (los logos son marcas registradas y no
     se incluyen), más "Otro servicio" con cualquier billetera Interledger.
+  ▸ El comercio paga desde su propia billetera: se le crea una identidad de
+    pagador con sus billeteras, que autoriza una vez con
+    npm run grant:buyer -- --buyer <su billetera>. La app muestra el comando
+    mientras falte el permiso.
   ▸ Inscripción: referencia, monto, día del mes (1 a 28) y billetera que paga.
-  ▸ Cobro automático el día elegido a las 8:00 a. m.; también "Pagar ahora",
+  ▸ Pago automático el día elegido a las 8:00 a. m.; también "Pagar ahora",
     pausar, reanudar y eliminar.
-  ▸ Cada cobro es una venta normal (chargeSale): mismos topes, grant y monedas
-    que un toque; queda en el historial con chargedVia RECURRING.
-  ▸ Backend: GET /billers, GET|POST /buyers/:id/recurring,
-    PATCH|DELETE /buyers/:id/recurring/:rid, POST /buyers/:id/recurring/:rid/pay
-  ▸ App: pestaña "Pagos" en el menú del comprador.
+  ▸ Cada pago es una venta normal (chargeSale) con chargedVia RECURRING: los
+    pagados cuentan como obligaciones al día y los fallidos como pagos no
+    hechos en el resumen.
+  ▸ Backend: GET /billers, GET /vendors/:id/payer,
+    GET|POST /vendors/:id/recurring, PATCH|DELETE /vendors/:id/recurring/:rid,
+    POST /vendors/:id/recurring/:rid/pay
 
   Configuración nueva:  BILLER_WALLETS · BILLERS_DEFAULT_WALLET · RECURRING_CHECK_MINUTES
-  Migración nueva:      20261017120000_recurring_payments  (Vendor.kind, RecurringPayment)
+  Migraciones nuevas:   20261017120000_recurring_payments
+                        20261017150000_vendor_recurring  (Vendor.payerBuyerId,
+                        RecurringPayment.vendorId)
 
 
 ──────────────────────────────────────────────────────────────────────────────
   VERIFICACIÓN
 ──────────────────────────────────────────────────────────────────────────────
 
-  ✔ tap-to-pay-svc: typecheck y 178 tests en verde (20 nuevos).
-  ✔ PDF de muestra generado y revisado página por página; una sola hoja.
-  ✔ Servicio real: el PDF responde 200 application/pdf; una inscripción se
-    resolvió contra la Test Wallet (EUR) y se eliminó.
+  ✔ tap-to-pay-svc: typecheck y 182 tests en verde.
+  ✔ PDF de muestra con 6 meses de ventas y servicios pagados (uno fallido),
+    revisado hoja por hoja.
+  ✔ Servicio real: el comercio obtuvo su identidad de pagador (billetera EUR,
+    pendiente de autorizar), no aparece entre los compradores, y el PDF responde
+    200 application/pdf.
   ✔ tap-to-pay-app: tsc, expo lint y export para iOS.
-  ✘ Pendiente: un cobro recurrente real y la descarga del PDF desde el teléfono.
+  ✘ Pendiente: autorizar la billetera del comercio, un pago recurrente real y la
+    descarga del PDF desde el teléfono.

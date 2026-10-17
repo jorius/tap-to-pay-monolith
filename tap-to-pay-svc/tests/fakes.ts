@@ -86,6 +86,7 @@ export class FakeRepo implements Repo {
       name: 'Tienda',
       defaultWalletId: null,
       kind: 'MERCHANT',
+      payerBuyerId: null,
       createdAt: this.now(),
       ...fields,
     };
@@ -172,8 +173,21 @@ export class FakeRepo implements Repo {
     const { id } = this.addVendor({ name, kind: 'BILLER', wallet: input });
     return this.vendorWithWallets(this.mustVendor(id));
   }
-  async listRecurring(buyerId: string) {
-    return [...this.recurring.values()].filter((r) => r.buyerId === buyerId).map((r) => ({ ...r }));
+  async setVendorPayer(vendorId: string, buyerId: string) {
+    this.mustVendor(vendorId).payerBuyerId = buyerId;
+  }
+  async listRecurring(vendorId: string) {
+    return [...this.recurring.values()].filter((r) => r.vendorId === vendorId).map((r) => ({ ...r }));
+  }
+  async listPayerSales(buyerId: string, { from, to }: { from: Date; to: Date }): Promise<SaleWithVendor[]> {
+    return [...this.sales.values()]
+      .filter((s) => s.buyerId === buyerId && s.createdAt >= from && s.createdAt < to)
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+      .map((s) => ({
+        ...s,
+        vendorName: this.vendors.get(s.vendorId)?.name ?? '?',
+        vendorPublicName: s.vendorWalletId ? (this.vendorWallets.get(s.vendorWalletId)?.publicName ?? null) : null,
+      }));
   }
   async getRecurring(id: string) {
     const row = this.recurring.get(id);

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { SaleStatus } from '../contracts.js';
-import type { SaleWithBuyer, VendorWalletRow } from '../db/repos.js';
+import type { SaleWithBuyer, SaleWithVendor, VendorWalletRow } from '../db/repos.js';
 import { HttpError, validation } from './errors.js';
 import { localDate, localInstant } from './limits.js';
 import type { Deps } from './sales.js';
@@ -15,6 +15,57 @@ const TREND_MONTHS = 6;
 const STATUSES: SaleStatus[] = ['PAID', 'CHARGING', 'FAILED'];
 
 export type MonthTotals = { month: string; count: number; total: bigint };
+
+/** One month of the payment-capacity table: what came in, what the vendor paid out in obligations, what was left. */
+export type CapacityMonth = {
+  month: string;
+  income: bigint;
+  sales: number;
+  activeDays: number;
+  /** Recurring payments the vendor paid that month, in this wallet's asset. */
+  obligationsPaid: bigint;
+  obligationsCount: number;
+  /** Recurring payments refused or failed that month. */
+  obligationsMissed: number;
+  /** income - obligationsPaid. */
+  net: bigint;
+};
+
+/** One of this month's recurring payments, as the statement lists it. */
+export type Obligation = {
+  date: Date;
+  payee: string;
+  /** The reference, from the sale's description. */
+  reference: string | null;
+  amount: bigint;
+  assetCode: string;
+  assetScale: number;
+  status: SaleStatus;
+};
+
+/**
+ * What a lender reads to judge whether the vendor can pay a loan month after month, over the 6-month window. Averages
+ * run from the first month with income, so a new business is not averaged with months before it existed.
+ */
+export type Capacity = {
+  months: CapacityMonth[];
+  /** Months from the first one with income to this one. */
+  historyMonths: number;
+  averageIncome: bigint;
+  minimumIncome: bigint;
+  /** Coefficient of variation of the monthly income; lower is steadier. Null with fewer than two months. */
+  variation: number | null;
+  stability: 'high' | 'medium' | 'low' | null;
+  /** Mean month-over-month change of the income, over months whose previous one had income. */
+  averageGrowth: number | null;
+  averageObligations: bigint;
+  /** averageObligations / averageIncome. */
+  obligationRatio: number | null;
+  /** averageIncome - averageObligations: what is left each month, on average, to service a loan. */
+  estimatedCapacity: bigint;
+  /** Recurring payments over the window: paid, missed (refused or failed), and paid / (paid + missed). */
+  punctuality: { paid: number; missed: number; rate: number | null };
+};
 
 export type WalletStatement = {
   walletAddress: string;
@@ -46,6 +97,9 @@ export type WalletStatement = {
   growth: { total: number | null; count: number | null };
   /** Paid per month, oldest first, ending with this one. */
   trend: MonthTotals[];
+  capacity: Capacity;
+  /** This month's recurring payments made from this wallet, oldest first. */
+  obligations: Obligation[];
 };
 
 export type Statement = {
@@ -88,24 +142,39 @@ export async function buildStatement(
   const trendFrom = monthStart(1 - TREND_MONTHS);
   // Every claimed or refused sale of the vendor over the trend window, all wallets; split per wallet below.
   const sales = await deps.repo.listVendorSales(vendorId, { statuses: STATUSES, from: trendFrom, to });
+  // What the vendor paid out: its recurring payments, made by its payer identity from the same wallet addresses.
+  const payer = vendor.payerBuyerId ? await deps.repo.getBuyer(vendor.payerBuyerId) : null;
+  const payerAddress = new Map((payer?.wallets ?? []).map((w) => [w.id, w.walletAddress]));
+  const paidOut = payer
+    ? (await deps.repo.listPayerSales(payer.id, { from: trendFrom, to })).filter(
+        (s) => s.chargedVia === 'RECURRING' && (s.status === 'PAID' || s.status === 'FAILED'),
+      )
+    : [];
 
   const wallets = vendor.wallets
     .map((wallet) =>
       walletStatement(
         wallet,
         sales.filter((s) => s.vendorWalletId === wallet.id),
+        paidOut.filter((s) => s.buyerWalletId !== null && payerAddress.get(s.buyerWalletId) === wallet.walletAddress),
         { year, month, from, to, tz },
       ),
     )
     // A wallet with nothing in six months adds an empty page; keep it only if it is the only one.
-    .filter((w, _, all) => all.length === 1 || w.trend.some((m) => m.count > 0));
+    .filter((w, _, all) => all.length === 1 || w.trend.some((m) => m.count > 0) || w.capacity.punctuality.paid > 0);
 
   const name = vendor.wallets.find((w) => w.id === vendor.defaultWalletId)?.publicName ?? vendor.name;
   const monthKey = `${year}-${String(month).padStart(2, '0')}`;
   const fingerprint = JSON.stringify([
     vendorId,
     monthKey,
-    wallets.map((w) => [w.walletAddress, w.paid.count, w.paid.total.toString(), w.failed.count]),
+    wallets.map((w) => [
+      w.walletAddress,
+      w.paid.count,
+      w.paid.total.toString(),
+      w.failed.count,
+      w.capacity.months.map((m) => [m.income.toString(), m.obligationsPaid.toString(), m.obligationsMissed]),
+    ]),
   ]);
   const code = createHash('sha256').update(fingerprint).digest('hex').slice(0, 12).toUpperCase();
   return {
@@ -124,6 +193,7 @@ export async function buildStatement(
 function walletStatement(
   wallet: VendorWalletRow,
   sales: SaleWithBuyer[],
+  paidOut: SaleWithVendor[],
   period: { year: number; month: number; from: Date; to: Date; tz: string },
 ): WalletStatement {
   const { year, month, from, to, tz } = period;
@@ -169,6 +239,22 @@ function walletStatement(
     return { month: `${y}-${String(m).padStart(2, '0')}`, count: monthPaid.length, total: sum(monthPaid.map((s) => s.amount)) };
   });
   const previous = trend[trend.length - 2];
+  const capacity = capacityOf(wallet, sales, paidOut, year, month, tz);
+  const obligations: Obligation[] = paidOut
+    .filter((s) => s.createdAt >= from && s.createdAt < to)
+    .map((s) => {
+      const [payee, reference] = (s.description ?? '').split(' · ');
+      const debit = s.debitAmount !== null && s.debitAssetCode !== null;
+      return {
+        date: s.createdAt,
+        payee: payee || (s.vendorPublicName ?? s.vendorName),
+        reference: reference && reference !== 'pago recurrente' ? reference : null,
+        amount: debit ? s.debitAmount! : s.amount,
+        assetCode: debit ? s.debitAssetCode! : s.assetCode,
+        assetScale: debit ? s.debitAssetScale! : s.assetScale,
+        status: s.status,
+      };
+    });
   const change = (now: bigint, before: bigint) => (before > 0n ? Number(now - before) / Number(before) : null);
 
   return {
@@ -197,9 +283,75 @@ function walletStatement(
       .map(([channel, c]) => ({ channel, ...c }))
       .sort((a, b) => b.count - a.count || a.channel.localeCompare(b.channel)),
     daily,
+    capacity,
+    obligations,
     previousMonth: { count: previous.count, total: previous.total },
     growth: { total: change(total, previous.total), count: change(BigInt(paid.length), BigInt(previous.count)) },
     trend,
+  };
+}
+
+function capacityOf(
+  wallet: VendorWalletRow,
+  sales: SaleWithBuyer[],
+  paidOut: SaleWithVendor[],
+  year: number,
+  month: number,
+  tz: string,
+): Capacity {
+  const months: CapacityMonth[] = Array.from({ length: TREND_MONTHS }, (_, i) => {
+    const start = localInstant(year, month - (TREND_MONTHS - 1) + i, 1, 0, tz);
+    const end = localInstant(year, month - (TREND_MONTHS - 1) + i + 1, 1, 0, tz);
+    const { year: y, month: m } = localDate(start, tz);
+    const inMonth = <T extends { createdAt: Date }>(rows: T[]) => rows.filter((r) => r.createdAt >= start && r.createdAt < end);
+    const paid = inMonth(sales).filter((s) => s.status === 'PAID');
+    const out = inMonth(paidOut);
+    // Obligations count in this wallet's asset: what left the wallet (the quote's debit), never the payee's price.
+    const outPaid = out.filter((s) => s.status === 'PAID' && s.debitAssetCode === wallet.assetCode);
+    const income = sum(paid.map((s) => s.amount));
+    const obligationsPaid = sum(outPaid.map((s) => s.debitAmount ?? 0n));
+    return {
+      month: `${y}-${String(m).padStart(2, '0')}`,
+      income,
+      sales: paid.length,
+      activeDays: new Set(paid.map((s) => localParts(s.createdAt, tz).day)).size,
+      obligationsPaid,
+      obligationsCount: out.filter((s) => s.status === 'PAID').length,
+      obligationsMissed: out.filter((s) => s.status === 'FAILED').length,
+      net: income - obligationsPaid,
+    };
+  });
+
+  const first = months.findIndex((m) => m.income > 0n);
+  const history = first === -1 ? [] : months.slice(first);
+  const incomes = history.map((m) => m.income);
+  const averageIncome = incomes.length ? sum(incomes) / BigInt(incomes.length) : 0n;
+  const minimumIncome = incomes.length ? incomes.reduce((a, b) => (b < a ? b : a)) : 0n;
+  let variation: number | null = null;
+  if (incomes.length >= 2 && averageIncome > 0n) {
+    const mean = Number(averageIncome);
+    const sd = Math.sqrt(incomes.reduce((acc, v) => acc + (Number(v) - mean) ** 2, 0) / incomes.length);
+    variation = sd / mean;
+  }
+  const changes = history
+    .slice(1)
+    .map((m, i) => (history[i].income > 0n ? Number(m.income - history[i].income) / Number(history[i].income) : null))
+    .filter((c): c is number => c !== null);
+  const averageObligations = history.length ? sum(history.map((m) => m.obligationsPaid)) / BigInt(history.length) : 0n;
+  const paid = months.reduce((n, m) => n + m.obligationsCount, 0);
+  const missed = months.reduce((n, m) => n + m.obligationsMissed, 0);
+  return {
+    months,
+    historyMonths: history.length,
+    averageIncome,
+    minimumIncome,
+    variation,
+    stability: variation === null ? null : variation < 0.25 ? 'high' : variation < 0.5 ? 'medium' : 'low',
+    averageGrowth: changes.length ? changes.reduce((a, b) => a + b, 0) / changes.length : null,
+    averageObligations,
+    obligationRatio: averageIncome > 0n ? Number(averageObligations) / Number(averageIncome) : null,
+    estimatedCapacity: averageIncome - averageObligations,
+    punctuality: { paid, missed, rate: paid + missed ? paid / (paid + missed) : null },
   };
 }
 

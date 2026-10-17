@@ -212,7 +212,26 @@ export type BillerView = {
   available: boolean;
 };
 
-/** GET /buyers/:id/recurring: one monthly payment, in the payee's asset. */
+/**
+ * GET /vendors/:id/payer: the vendor as a payer, for its recurring payments. Each of the vendor's wallets is a payer
+ * wallet too; one pays once it is authorized (hasGrant) with grantCommand.
+ */
+export type VendorPayerView = {
+  buyerId: string;
+  wallets: {
+    id: string;
+    walletAddress: string;
+    publicName: string | null;
+    assetCode: string;
+    assetScale: number;
+    hasGrant: boolean;
+    isDefault: boolean;
+    /** What authorizes it, run in tap-to-pay-svc: npm run grant:buyer -- --buyer <walletAddress> */
+    grantCommand: string;
+  }[];
+};
+
+/** GET /vendors/:id/recurring: one monthly payment of the vendor, in the payee's asset. */
 export type RecurringView = {
   id: string;
   billerId: string | null;
@@ -224,7 +243,7 @@ export type RecurringView = {
   assetCode: string;
   assetScale: number;
   dayOfMonth: number;
-  /** The paying wallet; null when the buyer's default one pays. */
+  /** The paying wallet, one of the vendor's payer wallets; null when the default one pays. */
   walletId: string | null;
   active: boolean;
   nextRunAt: string;

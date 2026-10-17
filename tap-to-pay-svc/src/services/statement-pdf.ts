@@ -9,7 +9,7 @@ export type StatementLang = 'es' | 'en';
 
 const PAGE = { width: 595.28, height: 841.89, margin: 48 };
 const CONTENT = PAGE.width - PAGE.margin * 2;
-const COLORS = { brand: '#6B2FB3', ink: '#111827', muted: '#4B5563', line: '#E5E7EB', card: '#F5F3FA', bar: '#6B2FB3', ok: '#17845A', bad: '#BE3535' };
+const COLORS = { brand: '#6B2FB3', ink: '#111827', muted: '#4B5563', line: '#E5E7EB', card: '#F5F3FA', bar: '#6B2FB3', out: '#E07A1F', ok: '#17845A', bad: '#BE3535' };
 
 const MONTHS = {
   es: ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'],
@@ -18,7 +18,7 @@ const MONTHS = {
 
 const T = {
   es: {
-    title: 'Resumen mensual de ventas',
+    title: 'Resumen financiero mensual',
     period: (month: string, tz: string) => `${month} · hora de ${tz}`,
     generated: (at: string) => `Generado el ${at}`,
     wallet: 'Billetera que recibe',
@@ -63,9 +63,37 @@ const T = {
       'Los saldos están en la billetera del comercio. Este documento no es un certificado bancario.',
     verification: (code: string) => `Código de verificación: ${code}`,
     page: (n: number, total: number) => `Página ${n} de ${total}`,
+    capacity: 'Capacidad de pago',
+    capacitySub: (months: number, code: string) =>
+      `Últimos 6 meses · ${months === 1 ? '1 mes' : `${months} meses`} con ingresos · montos en ${code}`,
+    avgIncome: 'Ingreso mensual promedio',
+    minIncome: 'Ingreso del mes más bajo',
+    stability: 'Estabilidad de ingresos',
+    stabilityLevel: { high: 'Alta', medium: 'Media', low: 'Baja' } as Record<string, string>,
+    variation: (pct: string) => `variación ${pct}`,
+    avgObligations: 'Obligaciones mensuales promedio',
+    ratio: 'Obligaciones sobre ingresos',
+    capacityValue: 'Capacidad de pago estimada',
+    perMonth: 'por mes',
+    monthByMonth: 'Mes a mes',
+    columns: ['Mes', 'Ingresos', 'Ventas', 'Días', 'Obligaciones', 'Flujo neto', 'Pagos al día'],
+    incomeVsObligations: 'Ingresos y obligaciones pagadas',
+    legendIncome: 'Ingresos',
+    legendOut: 'Obligaciones',
+    history: 'Historial de pagos',
+    punctual: (paid: number, total: number, pct: string) =>
+      `${paid} de ${total} pagos de servicios hechos a tiempo (${pct}) en los últimos 6 meses.`,
+    noHistory:
+      'Aún no hay pagos de servicios registrados. Al inscribirlos en Pagos, cada mes pagado a tiempo suma a este historial.',
+    growthLine: (pct: string) => `Crecimiento mensual promedio de los ingresos: ${pct}.`,
+    obligationsOf: (month: string) => `Obligaciones de ${month}`,
+    obligationColumns: ['Fecha', 'Servicio', 'Referencia', 'Monto', 'Estado'],
+    noObligations: 'No hubo pagos de servicios este mes.',
+    more: (n: number) => `y ${n} más`,
+    status: { PAID: 'Pagado', FAILED: 'No pagado', CHARGING: 'En proceso', AWAITING_TAP: '-' } as Record<string, string>,
   },
   en: {
-    title: 'Monthly sales statement',
+    title: 'Monthly financial statement',
     period: (month: string, tz: string) => `${month} · ${tz} time`,
     generated: (at: string) => `Generated on ${at}`,
     wallet: 'Receiving wallet',
@@ -110,6 +138,33 @@ const T = {
       "Balances are held in the vendor's wallet. This document is not a bank certificate.",
     verification: (code: string) => `Verification code: ${code}`,
     page: (n: number, total: number) => `Page ${n} of ${total}`,
+    capacity: 'Payment capacity',
+    capacitySub: (months: number, code: string) =>
+      `Last 6 months · ${months === 1 ? '1 month' : `${months} months`} with income · amounts in ${code}`,
+    avgIncome: 'Average monthly income',
+    minIncome: 'Lowest monthly income',
+    stability: 'Income stability',
+    stabilityLevel: { high: 'High', medium: 'Medium', low: 'Low' } as Record<string, string>,
+    variation: (pct: string) => `variation ${pct}`,
+    avgObligations: 'Average monthly obligations',
+    ratio: 'Obligations to income',
+    capacityValue: 'Estimated payment capacity',
+    perMonth: 'per month',
+    monthByMonth: 'Month by month',
+    columns: ['Month', 'Income', 'Sales', 'Days', 'Obligations', 'Net flow', 'Paid on time'],
+    incomeVsObligations: 'Income and obligations paid',
+    legendIncome: 'Income',
+    legendOut: 'Obligations',
+    history: 'Payment history',
+    punctual: (paid: number, total: number, pct: string) =>
+      `${paid} of ${total} bill payments made on time (${pct}) over the last 6 months.`,
+    noHistory: 'No bill payments recorded yet. Once enrolled in Bills, every month paid on time adds to this history.',
+    growthLine: (pct: string) => `Average monthly income growth: ${pct}.`,
+    obligationsOf: (month: string) => `Obligations in ${month}`,
+    obligationColumns: ['Date', 'Service', 'Reference', 'Amount', 'Status'],
+    noObligations: 'No bill payments this month.',
+    more: (n: number) => `and ${n} more`,
+    status: { PAID: 'Paid', FAILED: 'Not paid', CHARGING: 'In progress', AWAITING_TAP: '-' } as Record<string, string>,
   },
 };
 
@@ -133,6 +188,10 @@ export function renderStatementPdf(statement: Statement, lang: StatementLang): P
 
   statement.wallets.forEach((wallet, i) => {
     if (i > 0) doc.addPage();
+    // What a lender reads first: income month after month, obligations and what is left; then the month's sales.
+    header(doc, t, statement.vendorName, capitalize(t.period(monthName, statement.timeZone)), t.generated(generated));
+    capacitySection(doc, t, lang, wallet, monthName);
+    doc.addPage();
     header(doc, t, statement.vendorName, capitalize(t.period(monthName, statement.timeZone)), t.generated(generated));
     walletSection(doc, t, lang, wallet);
   });
@@ -234,6 +293,145 @@ function walletSection(doc: Doc, t: Words, lang: StatementLang, w: WalletStateme
     doc.moveTo(PAGE.margin, next - 2).lineTo(PAGE.margin + CONTENT, next - 2).lineWidth(0.5).strokeColor(COLORS.line).stroke();
     doc.y = next;
   }
+}
+
+function capacitySection(doc: Doc, t: Words, lang: StatementLang, w: WalletStatement, monthName: string) {
+  const c = w.capacity;
+  const money = (amount: bigint) => localMoney(amount, w.assetScale, w.assetCode, lang);
+  const pct = (value: number) => `${(value * 100).toFixed(Math.abs(value) >= 0.1 || value === 0 ? 0 : 1).replace('.', lang === 'es' ? ',' : '.')} %`;
+  const shortMonths = MONTHS[lang].map((m) => capitalize(m.slice(0, 3)));
+  const monthLabel = (key: string) => `${shortMonths[Number(key.slice(5)) - 1]} ${key.slice(2, 4)}`;
+
+  doc.fillColor(COLORS.muted).font('Helvetica').fontSize(9).text(t.wallet, PAGE.margin, doc.y);
+  doc.fillColor(COLORS.ink).font('Helvetica-Bold').fontSize(10).text(`${w.publicName ?? w.walletAddress} · ${w.walletAddress}`, PAGE.margin, doc.y + 1, { width: CONTENT });
+  doc.y += 8;
+  doc.fillColor(COLORS.ink).font('Helvetica-Bold').fontSize(15).text(t.capacity, PAGE.margin, doc.y);
+  doc.fillColor(COLORS.muted).font('Helvetica').fontSize(8.5).text(t.capacitySub(c.historyMonths, w.assetCode), { width: CONTENT });
+  doc.y += 8;
+
+  kpiGrid(doc, [
+    [t.avgIncome, money(c.averageIncome)],
+    [t.minIncome, money(c.minimumIncome)],
+    [t.stability, c.stability ? `${t.stabilityLevel[c.stability]} · ${t.variation(pct(c.variation!))}` : '-'],
+    [t.avgObligations, money(c.averageObligations)],
+    [t.ratio, c.obligationRatio === null ? '-' : pct(c.obligationRatio)],
+    [t.capacityValue, `${money(c.estimatedCapacity)} ${t.perMonth}`, c.estimatedCapacity > 0n ? COLORS.ok : COLORS.bad],
+  ]);
+
+  // Month by month.
+  doc.fillColor(COLORS.ink).font('Helvetica-Bold').fontSize(11).text(t.monthByMonth, PAGE.margin, doc.y);
+  doc.y += 4;
+  const widths = [52, 92, 42, 34, 92, 92, 95];
+  const row = (cells: string[], bold = false, color = COLORS.ink) => {
+    const y = doc.y;
+    let x = PAGE.margin;
+    cells.forEach((cell, i) => {
+      doc.fillColor(i === 0 || bold ? color : COLORS.ink).font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(8.5)
+        .text(cell, x, y, { width: widths[i] - 4, align: i === 0 ? 'left' : 'right' });
+      x += widths[i];
+    });
+    doc.y = y + 15;
+    doc.moveTo(PAGE.margin, doc.y - 3).lineTo(PAGE.margin + CONTENT, doc.y - 3).lineWidth(0.5).strokeColor(COLORS.line).stroke();
+  };
+  row(t.columns, true, COLORS.muted);
+  for (const m of c.months) {
+    const total = m.obligationsCount + m.obligationsMissed;
+    row([
+      monthLabel(m.month),
+      money(m.income),
+      String(m.sales),
+      String(m.activeDays),
+      money(m.obligationsPaid),
+      money(m.net),
+      total ? `${m.obligationsCount} de ${total}`.replace(' de ', lang === 'es' ? ' de ' : ' of ') : '-',
+    ]);
+  }
+  doc.y += 8;
+
+  groupedChart(doc, t, c.months.map((m) => ({ label: monthLabel(m.month), income: m.income, out: m.obligationsPaid })), money);
+
+  doc.fillColor(COLORS.ink).font('Helvetica-Bold').fontSize(11).text(t.history, PAGE.margin, doc.y);
+  const { paid, missed, rate } = c.punctuality;
+  doc.fillColor(COLORS.ink).font('Helvetica').fontSize(9)
+    .text(rate === null ? t.noHistory : t.punctual(paid, paid + missed, pct(rate)), PAGE.margin, doc.y + 2, { width: CONTENT });
+  if (c.averageGrowth !== null) {
+    doc.text(t.growthLine(`${c.averageGrowth >= 0 ? '+' : '-'}${pct(Math.abs(c.averageGrowth))}`), { width: CONTENT });
+  }
+  doc.y += 8;
+
+  // This month's obligations.
+  doc.fillColor(COLORS.ink).font('Helvetica-Bold').fontSize(11).text(t.obligationsOf(monthName), PAGE.margin, doc.y);
+  doc.y += 4;
+  if (w.obligations.length === 0) {
+    doc.fillColor(COLORS.muted).font('Helvetica-Oblique').fontSize(9).text(t.noObligations, PAGE.margin, doc.y);
+    return;
+  }
+  const oWidths = [70, 130, 120, 110, 69];
+  const date = new Intl.DateTimeFormat(lang === 'es' ? 'es-CO' : 'en-US', { day: 'numeric', month: 'short' });
+  const oRow = (cells: string[], bold = false, colors: string[] = []) => {
+    const y = doc.y;
+    let x = PAGE.margin;
+    cells.forEach((cell, i) => {
+      doc.fillColor(colors[i] ?? (bold ? COLORS.muted : COLORS.ink)).font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(8.5)
+        .text(cell, x, y, { width: oWidths[i] - 4, align: i >= 3 ? 'right' : 'left', lineBreak: false, ellipsis: true });
+      x += oWidths[i];
+    });
+    doc.y = y + 14;
+  };
+  oRow(t.obligationColumns, true);
+  const room = Math.max(1, Math.floor((PAGE.height - 92 - doc.y) / 14) - 1);
+  for (const o of w.obligations.slice(0, room)) {
+    oRow(
+      [date.format(o.date), o.payee, o.reference ?? '-', localMoney(o.amount, o.assetScale, o.assetCode, lang), t.status[o.status] ?? o.status],
+      false,
+      [COLORS.ink, COLORS.ink, COLORS.ink, COLORS.ink, o.status === 'PAID' ? COLORS.ok : COLORS.bad],
+    );
+  }
+  if (w.obligations.length > room) {
+    doc.fillColor(COLORS.muted).font('Helvetica').fontSize(8).text(t.more(w.obligations.length - room), PAGE.margin, doc.y);
+  }
+}
+
+function kpiGrid(doc: Doc, kpis: [string, string, string?][]) {
+  const boxW = (CONTENT - 16) / 3;
+  const boxH = 54;
+  const top = doc.y;
+  kpis.forEach(([label, value, color], i) => {
+    const x = PAGE.margin + (i % 3) * (boxW + 8);
+    const y = top + Math.floor(i / 3) * (boxH + 8);
+    doc.roundedRect(x, y, boxW, boxH, 8).fill(COLORS.card);
+    doc.fillColor(COLORS.muted).font('Helvetica').fontSize(8.5).text(label, x + 10, y + 10, { width: boxW - 20 });
+    doc.fillColor(color ?? COLORS.ink).font('Helvetica-Bold').fontSize(value.length > 18 ? 10.5 : 14).text(value, x + 10, y + 26, { width: boxW - 20 });
+  });
+  doc.y = top + Math.ceil(kpis.length / 3) * (boxH + 8) + 8;
+}
+
+function groupedChart(doc: Doc, t: Words, bars: { label: string; income: bigint; out: bigint }[], format: (v: bigint) => string) {
+  const height = 70;
+  doc.fillColor(COLORS.ink).font('Helvetica-Bold').fontSize(11).text(t.incomeVsObligations, PAGE.margin, doc.y);
+  // Legend, right-aligned on the title line.
+  const legendY = doc.y - 11;
+  doc.rect(PAGE.margin + CONTENT - 150, legendY + 1, 8, 8).fill(COLORS.bar);
+  doc.fillColor(COLORS.muted).font('Helvetica').fontSize(7.5).text(t.legendIncome, PAGE.margin + CONTENT - 138, legendY + 1);
+  doc.rect(PAGE.margin + CONTENT - 80, legendY + 1, 8, 8).fill(COLORS.out);
+  doc.fillColor(COLORS.muted).text(t.legendOut, PAGE.margin + CONTENT - 68, legendY + 1);
+  const max = bars.reduce((m, b) => (b.income > m ? b.income : b.out > m ? b.out : m), 0n);
+  const top = doc.y + 6;
+  const base = top + height;
+  const slot = CONTENT / bars.length;
+  const barW = slot * 0.28;
+  doc.moveTo(PAGE.margin, base).lineTo(PAGE.margin + CONTENT, base).lineWidth(0.6).strokeColor(COLORS.line).stroke();
+  const h = (v: bigint) => (max > 0n ? (Number((v * 1000n) / max) / 1000) * (height - 10) : 0);
+  bars.forEach((bar, i) => {
+    const x = PAGE.margin + i * slot + slot / 2 - barW - 1;
+    if (h(bar.income) > 0) doc.rect(x, base - h(bar.income), barW, h(bar.income)).fill(COLORS.bar);
+    if (h(bar.out) > 0) doc.rect(x + barW + 2, base - h(bar.out), barW, h(bar.out)).fill(COLORS.out);
+    if (bar.income > 0n) {
+      doc.fillColor(COLORS.muted).font('Helvetica').fontSize(6).text(format(bar.income), PAGE.margin + i * slot, base - h(bar.income) - 9, { width: slot, align: 'center' });
+    }
+    doc.fillColor(COLORS.muted).font('Helvetica').fontSize(7).text(bar.label, PAGE.margin + i * slot, base + 3, { width: slot, align: 'center' });
+  });
+  doc.y = base + 20;
 }
 
 function barChart(

@@ -1,94 +1,126 @@
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 
 import { api, ApiError } from '@/api/client';
 import { buyerAmount, formatMoney } from '@/api/money';
-import type { BillerView, BuyerView, RecurringView, SaleView } from '@/api/types';
+import type { BillerView, RecurringView, SaleView, VendorPayerView, VendorView } from '@/api/types';
 import { BigButton } from '@/components/big-button';
-import { AddRecurringSheet } from '@/components/buyer/add-recurring-sheet';
-import { BillerBadge } from '@/components/buyer/biller-badge';
-import { LoadState } from '@/components/buyer/load-state';
 import { useRefusalText } from '@/components/buyer/refusal';
+import { AddRecurringSheet } from '@/components/recurring/add-recurring-sheet';
+import { BillerBadge } from '@/components/recurring/biller-badge';
 import { Screen } from '@/components/screen';
 import { StatusPill } from '@/components/status-pill';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { locale } from '@/components/vendor/format';
-import { Fill, roleColors } from '@/constants/theme';
+import { ErrorState, LoadingState } from '@/components/vendor/states';
+import { VendorGate } from '@/components/vendor/vendor-gate';
+import { Brand, Fill, roleColors } from '@/constants/theme';
 import { useApi } from '@/hooks/use-api';
-import { useSession } from '@/hooks/use-session';
 import { useTheme } from '@/hooks/use-theme';
 import { defineCopy, useCopy, useLang } from '@/i18n';
 
 const copy = defineCopy(
   {
-    title: 'Pagos recurrentes',
-    intro: 'Inscribe tus servicios y se pagan solos cada mes desde tu billetera, dentro de tus topes.',
+    title: 'Pagos de servicios',
+    intro:
+      'Inscribe los servicios de tu negocio y se pagan solos cada mes desde tu billetera. Cada pago a tiempo suma a tu historial de pagos, el que muestra el resumen PDF para pedir un crédito.',
+    authorizeTitle: 'Autoriza tu billetera para pagar',
+    authorizeBody:
+      'Open Payments pide tu permiso una sola vez para que el servicio pague desde tu billetera. Corre esto en tap-to-pay-svc y acepta en el navegador:',
     add: 'Añadir pago',
-    empty: 'Aún no tienes pagos inscritos. Toca Añadir pago y elige EPM, Claro, Tigo u otro servicio.',
+    empty: 'Aún no tienes servicios inscritos. Toca Añadir pago y elige EPM, Claro, Tigo u otro servicio.',
     every: (day: number) => `Cada mes, el día ${day}`,
-    next: (date: string) => `Próximo cobro: ${date}`,
+    next: (date: string) => `Próximo pago: ${date}`,
     paused: 'En pausa',
-    last: { PAID: 'Último pago aprobado', FAILED: 'Último pago rechazado', CHARGING: 'Último pago en proceso', AWAITING_TAP: '' } as Record<string, string>,
+    last: { PAID: 'Último pago a tiempo', FAILED: 'Último pago no se hizo', CHARGING: 'Último pago en proceso', AWAITING_TAP: '' } as Record<string, string>,
     payNow: 'Pagar ahora',
     paying: 'Pagando…',
     pause: 'Pausar',
     resume: 'Reanudar',
     remove: 'Eliminar',
     removeTitle: (name: string) => `¿Eliminar el pago a ${name}?`,
-    removeBody: 'Dejará de cobrarse. Los pagos ya hechos siguen en tu historial.',
+    removeBody: 'Dejará de pagarse. Los pagos ya hechos siguen en tu historial.',
     cancel: 'Cancelar',
     paidNow: (amount: string) => `Pagado: ${amount}`,
   },
   {
-    title: 'Recurring payments',
-    intro: 'Enrol your services and they pay themselves every month from your wallet, within your limits.',
+    title: 'Bill payments',
+    intro:
+      "Enrol your business's services and they pay themselves every month from your wallet. Every payment on time adds to your payment history, the one the PDF statement shows a lender.",
+    authorizeTitle: 'Authorize your wallet to pay',
+    authorizeBody:
+      'Open Payments asks for your permission once so the service can pay from your wallet. Run this in tap-to-pay-svc and accept in the browser:',
     add: 'Add payment',
-    empty: 'No payments enrolled yet. Tap Add payment and pick EPM, Claro, Tigo or another service.',
+    empty: 'No services enrolled yet. Tap Add payment and pick EPM, Claro, Tigo or another service.',
     every: (day: number) => `Every month, on day ${day}`,
-    next: (date: string) => `Next charge: ${date}`,
+    next: (date: string) => `Next payment: ${date}`,
     paused: 'Paused',
-    last: { PAID: 'Last payment approved', FAILED: 'Last payment refused', CHARGING: 'Last payment in progress', AWAITING_TAP: '' } as Record<string, string>,
+    last: { PAID: 'Last payment on time', FAILED: 'Last payment not made', CHARGING: 'Last payment in progress', AWAITING_TAP: '' } as Record<string, string>,
     payNow: 'Pay now',
     paying: 'Paying…',
     pause: 'Pause',
     resume: 'Resume',
     remove: 'Remove',
     removeTitle: (name: string) => `Remove the payment to ${name}?`,
-    removeBody: 'It will no longer be charged. Payments already made stay in your history.',
+    removeBody: 'It will no longer be paid. Payments already made stay in your history.',
     cancel: 'Cancel',
     paidNow: (amount: string) => `Paid: ${amount}`,
   },
 );
 
-// The buyer's monthly payments to services (SDD §10, "Recurring payments"): the list, pay now, pause and remove, and
-// the sheet to enrol in a new one.
 export default function RecurringScreen() {
-  const { buyerId } = useSession();
+  return <VendorGate>{(vendor) => <Recurring vendor={vendor} />}</VendorGate>;
+}
+
+// The vendor's monthly payments to services (SDD §10, "Recurring payments"): paid from the vendor's own wallets, which
+// need a grant once; the list, pay now, pause and remove, and the sheet to enrol in a new one.
+function Recurring({ vendor }: { vendor: VendorView }) {
   const t = useCopy(copy);
-  const list = useApi<RecurringView[]>(buyerId ? `/buyers/${buyerId}/recurring` : null);
+  const theme = useTheme();
+  const base = `/vendors/${vendor.id}`;
+  const list = useApi<RecurringView[]>(`${base}/recurring`);
   const billers = useApi<BillerView[]>('/billers');
-  const buyer = useApi<BuyerView>(buyerId ? `/buyers/${buyerId}` : null);
+  const payer = useApi<VendorPayerView>(`${base}/payer`);
   const [adding, setAdding] = useState(false);
-  if (!buyerId) return null;
   const items = list.data ?? [];
   const byId = new Map((billers.data ?? []).map((b) => [b.id, b]));
-
+  const unauthorized = (payer.data?.wallets ?? []).filter((w) => !w.hasGrant);
   const replace = (row: RecurringView) => list.set(items.map((r) => (r.id === row.id ? row : r)));
 
+  if (list.error && !list.data) return <Screen onRefresh={list.reload}><ErrorState error={list.error} onRetry={list.reload} /></Screen>;
   return (
-    <Screen onRefresh={() => Promise.all([list.reload(), billers.reload(), buyer.reload()])}>
+    <Screen onRefresh={() => Promise.all([list.reload(), billers.reload(), payer.reload()])}>
       <ThemedText type="title">{t.title}</ThemedText>
       <ThemedText type="caption">{t.intro}</ThemedText>
-      <BigButton label={t.add} color={Fill.buyer} disabled={!billers.data || !buyer.data} onPress={() => setAdding(true)} />
-      <LoadState loading={list.loading} error={list.error} hasData={list.data !== undefined} onRetry={list.reload} />
+
+      {unauthorized.length > 0 && (
+        <ThemedView card style={{ borderColor: Brand.interledger, borderWidth: 2 }}>
+          <View style={styles.row}>
+            <MaterialCommunityIcons name="shield-key-outline" size={26} color={Brand.interledger} />
+            <ThemedText type="subtitle" style={styles.flex}>
+              {t.authorizeTitle}
+            </ThemedText>
+          </View>
+          <ThemedText type="caption">{t.authorizeBody}</ThemedText>
+          {unauthorized.map((w) => (
+            <Text key={w.id} selectable style={[styles.command, { color: theme.text, backgroundColor: theme.background }]}>
+              {w.grantCommand}
+            </Text>
+          ))}
+        </ThemedView>
+      )}
+
+      <BigButton label={t.add} color={Fill.vendor} disabled={!billers.data || !payer.data} onPress={() => setAdding(true)} />
+      {list.loading && !list.data && <LoadingState />}
       {list.data && items.length === 0 && <ThemedText>{t.empty}</ThemedText>}
       {items.map((row) => (
         <RecurringCard
           key={row.id}
           row={row}
           biller={row.billerId ? byId.get(row.billerId) : undefined}
-          buyerId={buyerId}
+          path={`${base}/recurring/${row.id}`}
           onChange={replace}
           onRemoved={() => list.set(items.filter((r) => r.id !== row.id))}
           onPaid={() => list.reload()}
@@ -96,9 +128,9 @@ export default function RecurringScreen() {
       ))}
       <AddRecurringSheet
         visible={adding}
-        buyerId={buyerId}
+        ownerPath={base}
         billers={billers.data ?? []}
-        wallets={buyer.data?.wallets ?? []}
+        wallets={payer.data?.wallets ?? []}
         onClose={() => setAdding(false)}
         onAdded={(row) => {
           setAdding(false);
@@ -112,21 +144,20 @@ export default function RecurringScreen() {
 type CardProps = {
   row: RecurringView;
   biller?: BillerView;
-  buyerId: string;
+  path: string;
   onChange: (row: RecurringView) => void;
   onRemoved: () => void;
   onPaid: () => void;
 };
 
-function RecurringCard({ row, biller, buyerId, onChange, onRemoved, onPaid }: CardProps) {
+function RecurringCard({ row, biller, path, onChange, onRemoved, onPaid }: CardProps) {
   const theme = useTheme();
   const lang = useLang();
   const t = useCopy(copy);
   const refusal = useRefusalText();
-  const colors = roleColors(theme, 'buyer');
+  const colors = roleColors(theme, 'vendor');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null);
-  const path = `/buyers/${buyerId}/recurring/${row.id}`;
   const when = new Date(row.nextRunAt).toLocaleString(locale(lang), { day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' });
 
   const run = async (work: () => Promise<void>) => {
@@ -144,22 +175,31 @@ function RecurringCard({ row, biller, buyerId, onChange, onRemoved, onPaid }: Ca
   const payNow = () =>
     run(async () => {
       const sale = await api<SaleView>(`${path}/pay`, { method: 'POST', timeoutMs: 30_000 });
-      setResult(sale.status === 'PAID' ? { tone: 'ok', text: t.paidNow(buyerAmount(sale, lang)) } : { tone: 'bad', text: refusal(sale) || sale.status });
+      setResult(
+        sale.status === 'PAID'
+          ? { tone: 'ok', text: t.paidNow(buyerAmount(sale, lang)) }
+          : { tone: 'bad', text: refusal(sale) || sale.status },
+      );
       onPaid();
     });
   const toggle = () => run(async () => onChange(await api<RecurringView>(path, { method: 'PATCH', body: { active: !row.active } })));
   const remove = () =>
     Alert.alert(t.removeTitle(row.payeeName), t.removeBody, [
       { text: t.cancel, style: 'cancel' },
-      { text: t.remove, style: 'destructive', onPress: () => run(async () => {
-        await api(path, { method: 'DELETE' });
-        onRemoved();
-      }) },
+      {
+        text: t.remove,
+        style: 'destructive',
+        onPress: () =>
+          run(async () => {
+            await api(path, { method: 'DELETE' });
+            onRemoved();
+          }),
+      },
     ]);
 
   return (
     <ThemedView card style={!row.active && styles.paused}>
-      <View style={styles.head}>
+      <View style={styles.row}>
         <BillerBadge biller={biller} name={row.payeeName} />
         <View style={styles.flex}>
           <Text style={[styles.name, { color: theme.text }]}>{row.payeeName}</Text>
@@ -174,12 +214,8 @@ function RecurringCard({ row, biller, buyerId, onChange, onRemoved, onPaid }: Ca
         <StatusPill tone={row.lastStatus === 'PAID' ? 'ok' : row.lastStatus === 'FAILED' ? 'bad' : 'wait'} label={t.last[row.lastStatus]} />
       ) : null}
       {result && <StatusPill tone={result.tone} label={result.text} />}
-      <View style={styles.actions}>
-        <View style={styles.flex}>
-          <BigButton label={busy ? t.paying : t.payNow} color={Fill.buyer} disabled={busy} onPress={payNow} />
-        </View>
-      </View>
-      <View style={styles.actions}>
+      <BigButton label={busy ? t.paying : t.payNow} color={Fill.vendor} disabled={busy} onPress={payNow} />
+      <View style={styles.row}>
         <View style={styles.flex}>
           <BigButton label={row.active ? t.pause : t.resume} color={colors.ink} ghost disabled={busy} onPress={toggle} />
         </View>
@@ -192,10 +228,10 @@ function RecurringCard({ row, biller, buyerId, onChange, onRemoved, onPaid }: Ca
 }
 
 const styles = StyleSheet.create({
-  head: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   flex: { flex: 1 },
   name: { fontSize: 18, fontWeight: '800' },
   amount: { fontSize: 18, fontWeight: '800', fontVariant: ['tabular-nums'] },
-  actions: { flexDirection: 'row', gap: 8 },
+  command: { fontFamily: 'monospace', fontSize: 12, padding: 10, borderRadius: 8 },
   paused: { opacity: 0.7 },
 });

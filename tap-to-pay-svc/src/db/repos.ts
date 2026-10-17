@@ -38,8 +38,10 @@ export type VendorRow = {
   name: string;
   /** One of the vendor's wallets, kept so by the service; vendorView falls back to the oldest if it is stale. */
   defaultWalletId: string | null;
-  /** MERCHANT sells with a terminal; BILLER is a service buyers pay monthly, left out of the vendor list. */
+  /** MERCHANT sells with a terminal; BILLER is a service vendors pay monthly, left out of the vendor list. */
   kind: string;
+  /** The vendor as a payer: a buyer holding the vendor's own wallets, for its recurring payments. */
+  payerBuyerId: string | null;
   createdAt: Date;
 };
 
@@ -102,11 +104,14 @@ export type Limits = { perPaymentLimit: bigint; dailyLimit: bigint };
 export type GrantTokens = { grantAccessToken: string; grantManageUrl: string; grantDailyLimit?: bigint };
 export type WalletAsset = { walletAddress: string; publicName: string | null; assetCode: string; assetScale: number };
 
-/** A buyer's monthly payment to a service; each run is a sale to the payee's vendor. */
+/** A vendor's monthly payment to a service; each run is a sale to the payee's vendor, paid by the vendor's payer. */
 export type RecurringRow = {
   id: string;
+  /** The vendor that owes it. */
+  vendorId: string;
+  /** The vendor's payer identity, whose wallet pays. */
   buyerId: string;
-  /** The paying wallet; null once removed, then the buyer's default wallet pays. */
+  /** The paying wallet, one of the payer's; null once removed, then its default wallet pays. */
   walletId: string | null;
   /** Catalog id (epm, claro, …); null for a payee the buyer typed. */
   billerId: string | null;
@@ -151,8 +156,11 @@ export interface Repo {
    * BILLER vendor named `name`.
    */
   ensureBillerVendor(name: string, wallet: WalletAsset): Promise<VendorWithWallets>;
-  /** A buyer's recurring payments, oldest first. */
-  listRecurring(buyerId: string): Promise<RecurringRow[]>;
+  setVendorPayer(vendorId: string, buyerId: string): Promise<void>;
+  /** A vendor's recurring payments, oldest first. */
+  listRecurring(vendorId: string): Promise<RecurringRow[]>;
+  /** Every sale a buyer paid or tried to pay inside [from, to), oldest first, with the receiving vendor's name. */
+  listPayerSales(buyerId: string, range: { from: Date; to: Date }): Promise<SaleWithVendor[]>;
   getRecurring(id: string): Promise<RecurringRow | null>;
   createRecurring(input: NewRecurring): Promise<RecurringRow>;
   updateRecurring(id: string, patch: RecurringPatch): Promise<RecurringRow>;
@@ -244,8 +252,25 @@ export class PrismaRepo implements Repo {
     return (await this.getVendor(vendorId))!;
   }
 
-  listRecurring(buyerId: string) {
-    return this.db.recurringPayment.findMany({ where: { buyerId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+  async setVendorPayer(vendorId: string, buyerId: string) {
+    await this.db.vendor.update({ where: { id: vendorId }, data: { payerBuyerId: buyerId } });
+  }
+
+  listRecurring(vendorId: string) {
+    return this.db.recurringPayment.findMany({ where: { vendorId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+  }
+
+  async listPayerSales(buyerId: string, { from, to }: { from: Date; to: Date }) {
+    const rows = await this.db.sale.findMany({
+      where: { buyerId, createdAt: { gte: from, lt: to } },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      include: { vendor: { select: { name: true } }, vendorWallet: { select: { publicName: true } } },
+    });
+    return rows.map(({ vendor, vendorWallet, ...sale }) => ({
+      ...sale,
+      vendorName: vendor.name,
+      vendorPublicName: vendorWallet?.publicName ?? null,
+    }));
   }
 
   getRecurring(id: string) {

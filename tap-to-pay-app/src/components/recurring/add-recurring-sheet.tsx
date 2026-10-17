@@ -4,9 +4,9 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { api, ApiError } from '@/api/client';
-import type { BillerView, BuyerWalletView, RecurringView } from '@/api/types';
+import type { BillerView, PayerWallet, RecurringView } from '@/api/types';
 import { BigButton } from '@/components/big-button';
-import { BillerBadge } from '@/components/buyer/biller-badge';
+import { BillerBadge } from '@/components/recurring/biller-badge';
 import { StatusPill } from '@/components/status-pill';
 import { ThemedText } from '@/components/themed-text';
 import { Brand, Fill } from '@/constants/theme';
@@ -62,9 +62,10 @@ const copy = defineCopy(
 
 type Props = {
   visible: boolean;
-  buyerId: string;
+  // Where the payments live: /vendors/<id>.
+  ownerPath: string;
   billers: BillerView[];
-  wallets: BuyerWalletView[];
+  wallets: PayerWallet[];
   onClose: () => void;
   onAdded: (recurring: RecurringView) => void;
 };
@@ -78,7 +79,7 @@ const toUrl = (value: string) => {
 
 // Enrol in a monthly payment: pick a service from the catalog (or "another" with any wallet), then the reference, the
 // amount, the day and the paying wallet. The service resolves the payee's wallet and prices the amount in its asset.
-export function AddRecurringSheet({ visible, buyerId, billers, wallets, onClose, onAdded }: Props) {
+export function AddRecurringSheet({ visible, ownerPath, billers, wallets, onClose, onAdded }: Props) {
   const theme = useTheme();
   const t = useCopy(copy);
   const [step, setStep] = useState<'pick' | 'form'>('pick');
@@ -120,7 +121,7 @@ export function AddRecurringSheet({ visible, buyerId, billers, wallets, onClose,
     setSaving(true);
     setError(null);
     try {
-      const created = await api<RecurringView>(`/buyers/${buyerId}/recurring`, {
+      const created = await api<RecurringView>(`${ownerPath}/recurring`, {
         method: 'POST',
         body: {
           ...(custom ? { payeeName: name.trim(), payeeWalletAddress: toUrl(walletAddress) } : { billerId: biller.id }),
@@ -256,7 +257,7 @@ export function AddRecurringSheet({ visible, buyerId, billers, wallets, onClose,
                           accessibilityState={{ selected, disabled: !w.hasGrant }}
                           disabled={!w.hasGrant}
                           onPress={() => setWalletId(w.id)}
-                          style={[styles.wallet, { borderColor: selected ? Fill.buyer : theme.border, opacity: w.hasGrant ? 1 : 0.4 }]}>
+                          style={[styles.wallet, { borderColor: selected ? Fill.vendor : theme.border, opacity: w.hasGrant ? 1 : 0.4 }]}>
                           <Text style={[styles.walletText, { color: theme.text }]}>
                             {(w.publicName ?? w.assetCode) + ' · ' + w.assetCode}
                           </Text>
@@ -269,7 +270,7 @@ export function AddRecurringSheet({ visible, buyerId, billers, wallets, onClose,
               )}
 
               {error && <StatusPill tone="bad" label={error} />}
-              <BigButton label={saving ? t.saving : t.save} color={Fill.buyer} disabled={!ready || saving} onPress={save} />
+              <BigButton label={saving ? t.saving : t.save} color={Fill.vendor} disabled={!ready || saving} onPress={save} />
             </>
           )}
         </ScrollView>

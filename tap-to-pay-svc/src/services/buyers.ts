@@ -13,9 +13,11 @@ type WalletDeps = BuyerDeps & Pick<Deps, 'op' | 'defaultLimits'>;
 const HISTORY_SIZE = 20;
 
 export async function listBuyerViews(deps: BuyerDeps): Promise<BuyerView[]> {
-  const buyers = await deps.repo.listBuyers();
+  const [buyers, vendors] = await Promise.all([deps.repo.listBuyers(), deps.repo.listVendors()]);
+  // A vendor's payer identity (its own wallets, for its recurring payments) is not a phone's buyer.
+  const payers = new Set(vendors.map((v) => v.payerBuyerId).filter((id): id is string => id !== null));
   // A buyer left without wallets has no view; skip it rather than fail the whole list (add:wallet repairs it).
-  return Promise.all(buyers.filter((b) => b.wallets.length > 0).map((b) => view(deps, b)));
+  return Promise.all(buyers.filter((b) => b.wallets.length > 0 && !payers.has(b.id)).map((b) => view(deps, b)));
 }
 
 export async function getBuyer(deps: BuyerDeps, id: string): Promise<BuyerView> {

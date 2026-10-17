@@ -263,7 +263,7 @@ describe('vendor wallets', () => {
 
   it("makes a vendor's first wallet the default", async () => {
     const { deps, repo } = setup();
-    repo.vendors.set('v0', { id: 'v0', name: 'Nueva', defaultWalletId: null, kind: 'MERCHANT', createdAt: NOW });
+    repo.vendors.set('v0', { id: 'v0', name: 'Nueva', defaultWalletId: null, kind: 'MERCHANT', payerBuyerId: null, createdAt: NOW });
     const view = await addVendorWallet(deps, 'v0', TIENDA_EUR);
     expect(view).toMatchObject({
       defaultWalletId: view.wallets[0].id,
@@ -351,7 +351,7 @@ describe('vendor wallets', () => {
 
   it('lists vendors with their wallets, leaving out one without wallets', async () => {
     const { deps, repo } = setup();
-    repo.vendors.set('v0', { id: 'v0', name: 'Nueva', defaultWalletId: null, kind: 'MERCHANT', createdAt: NOW });
+    repo.vendors.set('v0', { id: 'v0', name: 'Nueva', defaultWalletId: null, kind: 'MERCHANT', payerBuyerId: null, createdAt: NOW });
     expect((await listVendorViews(deps)).map((v) => [v.name, v.wallets.length])).toEqual([['Tienda', 1]]);
   });
 

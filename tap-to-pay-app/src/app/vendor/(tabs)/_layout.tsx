@@ -28,6 +28,7 @@ export default function VendorTabs() {
         { name: 'sale', title: t.tabs.sale, icon: 'contactless-payment' },
         { name: 'dashboard', title: t.tabs.dashboard, icon: 'chart-bar' },
         { name: 'transactions', title: t.tabs.transactions, icon: 'format-list-bulleted' },
+        { name: 'recurring', title: t.tabs.recurring, icon: 'calendar-sync' },
         { name: 'wallet', title: t.tabs.wallet, icon: 'wallet-outline' },
         { name: 'settings', title: t.tabs.settings, icon: 'tune-variant' },
       ]}
