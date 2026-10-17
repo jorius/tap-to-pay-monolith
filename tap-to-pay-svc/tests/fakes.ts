@@ -3,8 +3,11 @@ import type {
   BuyerWalletRow,
   GrantTokens,
   Limits,
+  NewRecurring,
   NewSale,
   NewWallet,
+  RecurringPatch,
+  RecurringRow,
   Repo,
   SalePatch,
   SaleRow,
@@ -24,6 +27,8 @@ import type { OpenPayments, Quote, RotatedToken, WalletInfo } from '../src/open-
 export const NOW = new Date('2026-10-14T15:00:00Z');
 
 export const PUBLIC_URL = 'https://pay.test';
+export const EPM_WALLET = 'https://ilp.test/epm';
+export const BILLERS_WALLET = 'https://ilp.test/servicios';
 
 export const BUYER_WALLET = 'https://ilp.test/ana';
 export const VENDOR_WALLET = 'https://ilp.test/tienda';
@@ -35,6 +40,7 @@ export class FakeRepo implements Repo {
   vendors = new Map<string, VendorRow>();
   vendorWallets = new Map<string, VendorWalletRow>();
   sales = new Map<string, SaleRow>();
+  recurring = new Map<string, RecurringRow>();
   private seq = 0;
 
   constructor(private readonly now: () => Date = () => NOW) {}
@@ -75,7 +81,14 @@ export class FakeRepo implements Repo {
 
   /** A vendor with one receiving wallet, its default; `wallet` overrides that wallet's fields. Returns both. */
   addVendor({ wallet: walletFields, ...fields }: Partial<VendorRow> & { wallet?: Partial<VendorWalletRow> } = {}) {
-    const vendor: VendorRow = { id: this.id('v'), name: 'Tienda', defaultWalletId: null, createdAt: this.now(), ...fields };
+    const vendor: VendorRow = {
+      id: this.id('v'),
+      name: 'Tienda',
+      defaultWalletId: null,
+      kind: 'MERCHANT',
+      createdAt: this.now(),
+      ...fields,
+    };
     this.vendors.set(vendor.id, vendor);
     const wallet = this.addVendorWallet(vendor.id, walletFields);
     vendor.defaultWalletId = wallet.id;
@@ -152,6 +165,52 @@ export class FakeRepo implements Repo {
     }
     const { id } = this.addVendor({ name, wallet: input });
     return this.vendorWithWallets(this.mustVendor(id));
+  }
+  async ensureBillerVendor(name: string, input: WalletAsset) {
+    const existing = await this.getVendorWalletByAddress(input.walletAddress);
+    if (existing) return this.vendorWithWallets(this.mustVendor(existing.vendorId));
+    const { id } = this.addVendor({ name, kind: 'BILLER', wallet: input });
+    return this.vendorWithWallets(this.mustVendor(id));
+  }
+  async listRecurring(buyerId: string) {
+    return [...this.recurring.values()].filter((r) => r.buyerId === buyerId).map((r) => ({ ...r }));
+  }
+  async getRecurring(id: string) {
+    const row = this.recurring.get(id);
+    return row ? { ...row } : null;
+  }
+  async createRecurring(input: NewRecurring) {
+    const row: RecurringRow = {
+      id: this.id('r'),
+      active: true,
+      lastRunAt: null,
+      lastSaleId: null,
+      lastStatus: null,
+      lastMessage: null,
+      createdAt: this.now(),
+      ...input,
+    };
+    this.recurring.set(row.id, row);
+    return { ...row };
+  }
+  async updateRecurring(id: string, patch: RecurringPatch) {
+    const row = this.recurring.get(id);
+    if (!row) throw new Error(`No recurring payment ${id}`);
+    Object.assign(row, patch);
+    return { ...row };
+  }
+  async deleteRecurring(id: string) {
+    if (!this.recurring.delete(id)) throw new Error(`No recurring payment ${id}`);
+  }
+  async listDueRecurring(now: Date) {
+    return [...this.recurring.values()].filter((r) => r.active && r.nextRunAt <= now).map((r) => ({ ...r }));
+  }
+  /** Checks before any await, like the conditional SQL. */
+  claimRecurringRun(id: string, from: Date, next: Date) {
+    const row = this.recurring.get(id);
+    if (!row || row.nextRunAt.getTime() !== from.getTime()) return Promise.resolve(false);
+    row.nextRunAt = next;
+    return Promise.resolve(true);
   }
   async createVendorWallet(vendorId: string, input: WalletAsset) {
     return this.addVendorWallet(vendorId, input);
@@ -406,6 +465,7 @@ export function makeDeps(overrides: Partial<Deps> = {}) {
     pollSeconds: 8,
     defaultLimits: { perPaymentLimit: 2000n, dailyLimit: 5000n },
     links: { ttlMinutes: 60, publicUrl: PUBLIC_URL, appScheme: 'taptopayapp' },
+    billers: { wallets: { epm: EPM_WALLET }, defaultWallet: BILLERS_WALLET },
     ...overrides,
   };
   return { deps, repo, op };

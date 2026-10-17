@@ -5,6 +5,7 @@ import { buyersRouter } from './routes/buyers.js';
 import { debugRouter } from './routes/debug.js';
 import { healthRouter } from './routes/health.js';
 import { paymentLinksRouter } from './routes/payment-links.js';
+import { recurringRouter } from './routes/recurring.js';
 import { salesRouter } from './routes/sales.js';
 import { vendorsRouter } from './routes/vendors.js';
 import { HttpError } from './services/errors.js';
@@ -22,6 +23,7 @@ export function createApp(deps: Deps, meta: AppMeta) {
   app.use(buyersRouter(deps));
   app.use(salesRouter(deps));
   app.use(paymentLinksRouter(deps));
+  app.use(recurringRouter(deps));
   app.use(debugRouter(deps, meta));
 
   app.use((req, res) => {

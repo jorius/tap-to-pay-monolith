@@ -38,6 +38,8 @@ export type VendorRow = {
   name: string;
   /** One of the vendor's wallets, kept so by the service; vendorView falls back to the oldest if it is stale. */
   defaultWalletId: string | null;
+  /** MERCHANT sells with a terminal; BILLER is a service buyers pay monthly, left out of the vendor list. */
+  kind: string;
   createdAt: Date;
 };
 
@@ -99,6 +101,39 @@ export type Limits = { perPaymentLimit: bigint; dailyLimit: bigint };
 /** A token rotation passes only the tokens, so the stored grantDailyLimit survives it. */
 export type GrantTokens = { grantAccessToken: string; grantManageUrl: string; grantDailyLimit?: bigint };
 export type WalletAsset = { walletAddress: string; publicName: string | null; assetCode: string; assetScale: number };
+
+/** A buyer's monthly payment to a service; each run is a sale to the payee's vendor. */
+export type RecurringRow = {
+  id: string;
+  buyerId: string;
+  /** The paying wallet; null once removed, then the buyer's default wallet pays. */
+  walletId: string | null;
+  /** Catalog id (epm, claro, …); null for a payee the buyer typed. */
+  billerId: string | null;
+  payeeName: string;
+  payeeWalletAddress: string;
+  payeeAssetCode: string;
+  payeeAssetScale: number;
+  reference: string | null;
+  /** In the payee's asset, smallest unit. */
+  amount: bigint;
+  /** 1 to 28. */
+  dayOfMonth: number;
+  active: boolean;
+  nextRunAt: Date;
+  lastRunAt: Date | null;
+  lastSaleId: string | null;
+  lastStatus: string | null;
+  lastMessage: string | null;
+  createdAt: Date;
+};
+export type NewRecurring = Omit<
+  RecurringRow,
+  'id' | 'active' | 'lastRunAt' | 'lastSaleId' | 'lastStatus' | 'lastMessage' | 'createdAt'
+>;
+export type RecurringPatch = Partial<
+  Pick<RecurringRow, 'active' | 'nextRunAt' | 'lastRunAt' | 'lastSaleId' | 'lastStatus' | 'lastMessage'>
+>;
 export type NewWallet = WalletAsset & Limits;
 
 const WALLET_ORDER = [{ createdAt: 'asc' as const }, { id: 'asc' as const }];
@@ -111,6 +146,21 @@ export interface Repo {
   getVendorWalletByAddress(walletAddress: string): Promise<VendorWalletRow | null>;
   /** As upsertBuyerWithWallet, for the vendor owning `wallet.walletAddress`. */
   upsertVendorWithWallet(name: string, wallet: WalletAsset): Promise<VendorWithWallets>;
+  /**
+   * The vendor that receives into `wallet.walletAddress`: whoever already owns that address (never renamed), else a new
+   * BILLER vendor named `name`.
+   */
+  ensureBillerVendor(name: string, wallet: WalletAsset): Promise<VendorWithWallets>;
+  /** A buyer's recurring payments, oldest first. */
+  listRecurring(buyerId: string): Promise<RecurringRow[]>;
+  getRecurring(id: string): Promise<RecurringRow | null>;
+  createRecurring(input: NewRecurring): Promise<RecurringRow>;
+  updateRecurring(id: string, patch: RecurringPatch): Promise<RecurringRow>;
+  deleteRecurring(id: string): Promise<void>;
+  /** Active ones whose nextRunAt has come. */
+  listDueRecurring(now: Date): Promise<RecurringRow[]>;
+  /** Moves nextRunAt from `from` to `next` only if it is still `from`: false when another run claimed it first. */
+  claimRecurringRun(id: string, from: Date, next: Date): Promise<boolean>;
   createVendorWallet(vendorId: string, wallet: WalletAsset): Promise<VendorWalletRow>;
   setDefaultVendorWallet(vendorId: string, walletId: string): Promise<void>;
   /** Its sales keep their vendor and lose the wallet link. */
@@ -178,6 +228,49 @@ export class PrismaRepo implements Repo {
       return created.id;
     });
     return (await this.getVendor(vendorId))!;
+  }
+
+  async ensureBillerVendor(name: string, wallet: WalletAsset) {
+    const vendorId = await this.db.$transaction(async (tx) => {
+      const existing = await tx.vendorWallet.findUnique({ where: { walletAddress: wallet.walletAddress } });
+      if (existing) return existing.vendorId;
+      const created = await tx.vendor.create({
+        data: { name, kind: 'BILLER', wallets: { create: wallet } },
+        include: { wallets: true },
+      });
+      await tx.vendor.update({ where: { id: created.id }, data: { defaultWalletId: created.wallets[0].id } });
+      return created.id;
+    });
+    return (await this.getVendor(vendorId))!;
+  }
+
+  listRecurring(buyerId: string) {
+    return this.db.recurringPayment.findMany({ where: { buyerId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+  }
+
+  getRecurring(id: string) {
+    return this.db.recurringPayment.findUnique({ where: { id } });
+  }
+
+  createRecurring(input: NewRecurring) {
+    return this.db.recurringPayment.create({ data: input });
+  }
+
+  updateRecurring(id: string, patch: RecurringPatch) {
+    return this.db.recurringPayment.update({ where: { id }, data: patch });
+  }
+
+  async deleteRecurring(id: string) {
+    await this.db.recurringPayment.delete({ where: { id } });
+  }
+
+  listDueRecurring(now: Date) {
+    return this.db.recurringPayment.findMany({ where: { active: true, nextRunAt: { lte: now } }, orderBy: { nextRunAt: 'asc' } });
+  }
+
+  async claimRecurringRun(id: string, from: Date, next: Date) {
+    const { count } = await this.db.recurringPayment.updateMany({ where: { id, nextRunAt: from }, data: { nextRunAt: next } });
+    return count === 1;
   }
 
   createVendorWallet(vendorId: string, wallet: WalletAsset) {

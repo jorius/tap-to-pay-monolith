@@ -2,7 +2,7 @@
 export type SaleStatus = 'AWAITING_TAP' | 'CHARGING' | 'PAID' | 'FAILED';
 
 // How the buyer reached the charge: a tap on the terminal, or the sale's payment link (WhatsApp or QR).
-export type ChargeChannel = 'NFC' | 'LINK';
+export type ChargeChannel = 'NFC' | 'LINK' | 'RECURRING';
 
 export type SaleView = {
   id: string;
@@ -153,3 +153,40 @@ export type VendorSummary = {
 
 // GET /vendors/:id/sales?status=PAID|CHARGING|FAILED&date=YYYY-MM-DD&limit=50: newest first, AWAITING_TAP left out.
 export type VendorSaleView = SaleView & { buyerName: string | null };
+
+// GET /billers: services a buyer can pay every month. The app draws each as a badge in its brand colour.
+export type BillerView = {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  color: string;
+  textColor: string;
+  initials: string;
+  // What the reference is called at this service: "Número de contrato", "Número de línea", …
+  referenceLabel: string;
+  // False when the service has no Interledger wallet configured (BILLER_WALLETS, BILLERS_DEFAULT_WALLET).
+  available: boolean;
+};
+
+// GET /buyers/:id/recurring: one monthly payment, in the payee's asset.
+export type RecurringView = {
+  id: string;
+  billerId: string | null;
+  payeeName: string;
+  payeeWalletAddress: string;
+  reference: string | null;
+  amount: string;
+  amountFormatted: string;
+  assetCode: string;
+  assetScale: number;
+  dayOfMonth: number;
+  // The paying wallet; null when the buyer's default one pays.
+  walletId: string | null;
+  active: boolean;
+  nextRunAt: string;
+  lastRunAt: string | null;
+  lastSaleId: string | null;
+  lastStatus: SaleStatus | null;
+  lastMessage: string | null;
+};

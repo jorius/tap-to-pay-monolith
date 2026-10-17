@@ -1,0 +1,88 @@
+══════════════════════════════════════════════════════════════════════════════
+  RESUMEN MENSUAL EN PDF  ·  PAGOS RECURRENTES
+══════════════════════════════════════════════════════════════════════════════
+
+  Sesión      17 de octubre de 2026
+  Herramienta Claude Code · Claude Opus 5.5
+  Rama        feat/statement-recurring  (sobre feat/payments-qr-whatsapp, PR #3)
+  Partes      tap-to-pay-svc  ·  tap-to-pay-app  ·  SDD.md
+
+
+──────────────────────────────────────────────────────────────────────────────
+  PROMPT ORIGINAL  (tal cual se envió)
+──────────────────────────────────────────────────────────────────────────────
+
+  ahora necesito que hagas lo sigueinte basado en este pr, debes añadir un ep en
+  el back que sea capaz de permitirle al vendedor poder visualizar el resumen del
+  mes en un pdf con todas las metricas que consideres importantes para por
+  ejemplo el pueda pedir un credito, el boton que permita descarglo descargarlo
+  debe estar en la pantala del historial, por otro lado en el menu del front
+  tambien debe haber una pantalla que permita al suario registrarse a pagos
+  recurrentes, por ejemplo puede poner la opción de un servicio de telefonia,
+  ptra cartera de interdger, pon allí servicios colombianos con sus respectivas
+  imagenes, como servciios publiscos epm,, calro, tigo, y pues que que quede
+  incrito y haya un boton en donde pueda añandir mas(este prontmt lo añades a los
+  promts pero ponlo as bonito)
+
+
+──────────────────────────────────────────────────────────────────────────────
+  EL PEDIDO, ORDENADO
+──────────────────────────────────────────────────────────────────────────────
+
+  1. Resumen del mes en PDF para el vendedor
+     · Un endpoint en el backend que genere el resumen mensual en PDF.
+     · Con las métricas que pediría una entidad para otorgar un crédito.
+     · El botón para descargarlo, en la pantalla del historial del vendedor.
+
+  2. Pagos recurrentes para el comprador
+     · Una pantalla en el menú de la app para inscribirse a pagos recurrentes.
+     · Servicios colombianos con su imagen: EPM, Claro, Tigo, …
+     · También cualquier otra billetera de Interledger.
+     · Que el pago quede inscrito, y un botón para añadir más.
+
+  3. Este prompt, guardado en prompts/ con buena presentación.
+
+
+──────────────────────────────────────────────────────────────────────────────
+  QUÉ SE CONSTRUYÓ
+──────────────────────────────────────────────────────────────────────────────
+
+  Resumen mensual en PDF
+  ▸ GET /vendors/:id/statement.pdf?month=AAAA-MM&lang=es|en  (pdfkit 0.20.2)
+  ▸ Una hoja A4 por billetera que recibe, con:
+      ingresos · ventas aprobadas · ticket promedio y mediano · venta más alta
+      clientes únicos y que repitieron · tasa de aprobación · rechazos por motivo
+      variación frente al mes anterior · días con ventas · mejor día · hora pico
+      canales (NFC, link o QR, recurrente) · pendientes de confirmar
+      gráfica de ingresos por día · tendencia de 6 meses
+      código de verificación y aviso: no es un certificado bancario
+  ▸ App: tarjeta "Resumen del mes en PDF" en Movimientos, con el mes
+    (este o los dos anteriores) y el botón Descargar PDF.
+
+  Pagos recurrentes
+  ▸ Catálogo: EPM, Claro, Tigo, Movistar, ETB y Vanti, como insignias con el
+    color y las iniciales de cada marca (los logos son marcas registradas y no
+    se incluyen), más "Otro servicio" con cualquier billetera Interledger.
+  ▸ Inscripción: referencia, monto, día del mes (1 a 28) y billetera que paga.
+  ▸ Cobro automático el día elegido a las 8:00 a. m.; también "Pagar ahora",
+    pausar, reanudar y eliminar.
+  ▸ Cada cobro es una venta normal (chargeSale): mismos topes, grant y monedas
+    que un toque; queda en el historial con chargedVia RECURRING.
+  ▸ Backend: GET /billers, GET|POST /buyers/:id/recurring,
+    PATCH|DELETE /buyers/:id/recurring/:rid, POST /buyers/:id/recurring/:rid/pay
+  ▸ App: pestaña "Pagos" en el menú del comprador.
+
+  Configuración nueva:  BILLER_WALLETS · BILLERS_DEFAULT_WALLET · RECURRING_CHECK_MINUTES
+  Migración nueva:      20261017120000_recurring_payments  (Vendor.kind, RecurringPayment)
+
+
+──────────────────────────────────────────────────────────────────────────────
+  VERIFICACIÓN
+──────────────────────────────────────────────────────────────────────────────
+
+  ✔ tap-to-pay-svc: typecheck y 178 tests en verde (20 nuevos).
+  ✔ PDF de muestra generado y revisado página por página; una sola hoja.
+  ✔ Servicio real: el PDF responde 200 application/pdf; una inscripción se
+    resolvió contra la Test Wallet (EUR) y se eliminó.
+  ✔ tap-to-pay-app: tsc, expo lint y export para iOS.
+  ✘ Pendiente: un cobro recurrente real y la descarga del PDF desde el teléfono.

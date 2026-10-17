@@ -3,7 +3,7 @@
 export type SaleStatus = 'AWAITING_TAP' | 'CHARGING' | 'PAID' | 'FAILED';
 
 /** How the buyer reached the charge: a tap on the terminal, or a payment link (WhatsApp or QR). */
-export type ChargeChannel = 'NFC' | 'LINK';
+export type ChargeChannel = 'NFC' | 'LINK' | 'RECURRING';
 
 export type SaleFailureCode =
   | 'BUYER_UNKNOWN'
@@ -26,6 +26,9 @@ export type HttpErrorCode =
   | 'SALE_NOT_CHARGEABLE'
   | 'PAYMENT_LINK_NOT_FOUND'
   | 'PAYMENT_LINK_EXPIRED'
+  | 'BILLER_NOT_FOUND'
+  | 'BILLER_UNAVAILABLE'
+  | 'RECURRING_NOT_FOUND'
   | 'INTERNAL';
 
 export type SaleView = {
@@ -192,6 +195,44 @@ export type VendorSummary = {
  * null only for BUYER_UNKNOWN refusals, which have no wallet to point at.
  */
 export type VendorSaleView = SaleView & { buyerName: string | null };
+
+/** GET /billers: the catalog of services a buyer can pay every month. */
+export type BillerView = {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  /** The badge the app draws: the brand colour, the text colour on it and the initials. */
+  color: string;
+  textColor: string;
+  initials: string;
+  /** What the buyer's reference is called at this service: "Número de contrato", "Número de línea", … */
+  referenceLabel: string;
+  /** False when no Interledger wallet is configured for it (BILLER_WALLETS, BILLERS_DEFAULT_WALLET). */
+  available: boolean;
+};
+
+/** GET /buyers/:id/recurring: one monthly payment, in the payee's asset. */
+export type RecurringView = {
+  id: string;
+  billerId: string | null;
+  payeeName: string;
+  payeeWalletAddress: string;
+  reference: string | null;
+  amount: string;
+  amountFormatted: string;
+  assetCode: string;
+  assetScale: number;
+  dayOfMonth: number;
+  /** The paying wallet; null when the buyer's default one pays. */
+  walletId: string | null;
+  active: boolean;
+  nextRunAt: string;
+  lastRunAt: string | null;
+  lastSaleId: string | null;
+  lastStatus: SaleStatus | null;
+  lastMessage: string | null;
+};
 
 export type Envelope<T> =
   | { data: T; error: null }

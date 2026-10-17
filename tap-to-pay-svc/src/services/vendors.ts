@@ -14,8 +14,9 @@ const CLAIMED_OR_REFUSED: SaleStatus[] = ['PAID', 'CHARGING', 'FAILED'];
 
 export async function listVendorViews(deps: Pick<Deps, 'repo'>): Promise<VendorView[]> {
   const vendors = await deps.repo.listVendors();
-  // A vendor left without wallets has no view; skip it rather than fail the whole list (add:wallet repairs it).
-  return vendors.filter((v) => v.wallets.length > 0).map(vendorView);
+  // A vendor left without wallets has no view; skip it rather than fail the whole list (add:wallet repairs it). Billers
+  // (EPM, Claro, …) receive recurring payments and never run a terminal, so they are not offered either.
+  return vendors.filter((v) => v.wallets.length > 0 && v.kind !== 'BILLER').map(vendorView);
 }
 
 /**

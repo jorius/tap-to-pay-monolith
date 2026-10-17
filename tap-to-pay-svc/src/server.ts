@@ -5,7 +5,9 @@ import { loadConfig } from './config.js';
 import { createPrisma } from './db/prisma.js';
 import { PrismaRepo } from './db/repos.js';
 import { createOpenPayments } from './open-payments/client.js';
+import { parseBillerWallets } from './services/billers.js';
 import { refreshPublicNames } from './services/public-names.js';
+import { runDueRecurring } from './services/recurring.js';
 import type { Deps } from './services/sales.js';
 
 const cfg = loadConfig(process.env);
@@ -34,6 +36,7 @@ const deps: Deps = {
     publicUrl: cfg.PUBLIC_URL,
     appScheme: cfg.APP_SCHEME,
   },
+  billers: { wallets: parseBillerWallets(cfg.BILLER_WALLETS), defaultWallet: cfg.BILLERS_DEFAULT_WALLET },
 };
 const app = createApp(deps, { clientWalletAddress: cfg.OP_CLIENT_WALLET_ADDRESS });
 
@@ -47,4 +50,9 @@ app.listen(cfg.PORT, '0.0.0.0', (err) => {
   console.log(`tap-to-pay-svc listening on http://0.0.0.0:${cfg.PORT}`);
   // In the background: requests are served meanwhile, with the names stored so far.
   refreshPublicNames(deps).catch((e) => console.warn(`Could not refresh wallet public names: ${e instanceof Error ? e.message : e}`));
+  // Recurring payments: one tick at start (a payment due while the service was down runs now), then every few minutes.
+  const tick = () =>
+    runDueRecurring(deps).catch((e) => console.warn(`Recurring payments check failed: ${e instanceof Error ? e.message : e}`));
+  tick();
+  setInterval(tick, cfg.RECURRING_CHECK_MINUTES * 60_000).unref();
 });

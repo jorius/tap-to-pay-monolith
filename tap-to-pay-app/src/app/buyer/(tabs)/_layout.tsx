@@ -17,6 +17,7 @@ export default function BuyerTabs() {
         tabs={[
           { name: 'card', title: t.tabs.card, icon: 'credit-card-outline' },
           { name: 'wallets', title: t.tabs.wallets, icon: 'wallet-outline' },
+          { name: 'recurring', title: t.tabs.recurring, icon: 'calendar-sync' },
           { name: 'history', title: t.tabs.history, icon: 'clock-outline' },
           { name: 'settings', title: t.tabs.settings, icon: 'tune-variant' },
         ]}

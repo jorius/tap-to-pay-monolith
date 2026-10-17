@@ -25,6 +25,8 @@ export type Deps = {
   defaultLimits: Limits;
   /** Payment links: how long one lives, the base URL to build it on (PUBLIC_URL, else the request's), the app's scheme. */
   links: { ttlMinutes: number; publicUrl?: string; appScheme: string };
+  /** Recurring payments: the wallet each catalog biller receives into (BILLER_WALLETS), else the default one. */
+  billers: { wallets: Record<string, string>; defaultWallet?: string };
 };
 
 const DESCRIPTION_MAX = 140;

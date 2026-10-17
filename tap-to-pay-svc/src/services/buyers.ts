@@ -194,13 +194,13 @@ function parseLimits(input: { perPaymentLimit: string; dailyLimit: string }): Li
   return { perPaymentLimit, dailyLimit };
 }
 
-function ownWallet(buyer: BuyerWithWallets, walletId: string): BuyerWalletRow {
+export function ownWallet(buyer: BuyerWithWallets, walletId: string): BuyerWalletRow {
   const wallet = buyer.wallets.find((w) => w.id === walletId);
   if (!wallet) throw new HttpError(404, 'WALLET_NOT_FOUND', `Wallet ${walletId} not found for buyer ${buyer.id}`);
   return wallet;
 }
 
-async function loadBuyer(deps: BuyerDeps, id: string): Promise<BuyerWithWallets> {
+export async function loadBuyer(deps: Pick<Deps, 'repo'>, id: string): Promise<BuyerWithWallets> {
   const buyer = await deps.repo.getBuyer(id);
   if (!buyer) throw new HttpError(404, 'BUYER_NOT_FOUND', `Buyer ${id} not found`);
   return buyer;

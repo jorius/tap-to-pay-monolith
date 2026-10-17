@@ -15,22 +15,23 @@ enum SaleStatus {
 }
 
 model Buyer {
-  id              String        @id @default(cuid())
+  id              String             @id @default(cuid())
   name            String
   // The wallet the buyer pays with by default. A plain id, not a foreign key, to avoid a Buyer <-> BuyerWallet cycle;
   // the service keeps it pointing at one of this buyer's wallets.
   defaultWalletId String?
-  createdAt       DateTime      @default(now())
+  createdAt       DateTime           @default(now())
   wallets         BuyerWallet[]
   sales           Sale[]
+  recurring       RecurringPayment[]
 }
 
 // One wallet address of a buyer (a "card" in the app). Caps and the grant live here, in this wallet's asset.
 model BuyerWallet {
-  id               String   @id @default(cuid())
+  id               String             @id @default(cuid())
   buyerId          String
-  buyer            Buyer    @relation(fields: [buyerId], references: [id], onDelete: Cascade)
-  walletAddress    String   @unique
+  buyer            Buyer              @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  walletAddress    String             @unique
   // The wallet address document's publicName, saved at registration and refreshed at service start.
   publicName       String?
   assetCode        String
@@ -41,13 +42,17 @@ model BuyerWallet {
   grantManageUrl   String?
   // The debitAmount approved per day in the grant, in this wallet's asset; null for grants without limits.
   grantDailyLimit  BigInt?
-  createdAt        DateTime @default(now())
+  createdAt        DateTime           @default(now())
   sales            Sale[]
+  recurring        RecurringPayment[]
 }
 
 model Vendor {
   id              String         @id @default(cuid())
   name            String
+  // MERCHANT sells with a terminal; BILLER is a service a buyer pays every month (EPM, Claro, …), kept out of the
+  // vendor list the app picks from.
+  kind            String         @default("MERCHANT")
   // The wallet a new sale receives into unless it names another. A plain id, like Buyer.defaultWalletId.
   defaultWalletId String?
   createdAt       DateTime       @default(now())
@@ -104,4 +109,37 @@ model Sale {
 
   @@index([buyerId, status, createdAt])
   @@index([buyerWalletId, status, createdAt])
+}
+
+// A buyer's monthly payment to a service (a biller from the catalog, or any Interledger wallet). Each run is an ordinary
+// sale to the biller's vendor, charged with the paying wallet's grant and caps like a tap.
+model RecurringPayment {
+  id                 String       @id @default(cuid())
+  buyerId            String
+  buyer              Buyer        @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  // The wallet that pays; null once removed, then the buyer's default wallet pays.
+  walletId           String?
+  wallet             BuyerWallet? @relation(fields: [walletId], references: [id], onDelete: SetNull)
+  // The catalog id (epm, claro, …); null for a payee the buyer typed.
+  billerId           String?
+  payeeName          String
+  payeeWalletAddress String
+  payeeAssetCode     String
+  payeeAssetScale    Int
+  // Contract, line or account number at the payee.
+  reference          String?
+  // In the payee's asset, smallest unit.
+  amount             BigInt
+  // 1 to 28, so every month has it; runs at 08:00 local (DAILY_LIMIT_TZ).
+  dayOfMonth         Int
+  active             Boolean      @default(true)
+  nextRunAt          DateTime
+  lastRunAt          DateTime?
+  lastSaleId         String?
+  lastStatus         String?
+  lastMessage        String?
+  createdAt          DateTime     @default(now())
+
+  @@index([active, nextRunAt])
+  @@index([buyerId])
 }
