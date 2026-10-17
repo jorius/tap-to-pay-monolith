@@ -1,7 +1,7 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useState, type ReactNode } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { api, ApiError } from '@/api/client';
 import type { BillerView, PayerWallet, RecurringView } from '@/api/types';
@@ -81,6 +81,7 @@ const toUrl = (value: string) => {
 // amount, the day and the paying wallet. The service resolves the payee's wallet and prices the amount in its asset.
 export function AddRecurringSheet({ visible, ownerPath, billers, wallets, onClose, onAdded }: Props) {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const t = useCopy(copy);
   const [step, setStep] = useState<'pick' | 'form'>('pick');
   const [biller, setBiller] = useState<BillerView | null>(null);
@@ -109,6 +110,9 @@ export function AddRecurringSheet({ visible, ownerPath, billers, wallets, onClos
     reset();
     onClose();
   };
+  // Back goes one step: from the form to the list of services, from the list out of the sheet. The Android back
+  // button and the iOS swipe-down do the same through onRequestClose.
+  const back = () => (step === 'form' ? setStep('pick') : close());
   const pick = (b: BillerView | null) => {
     setBiller(b);
     setStep('form');
@@ -143,18 +147,29 @@ export function AddRecurringSheet({ visible, ownerPath, billers, wallets, onClos
   const input = [styles.input, { color: theme.text, borderColor: theme.border, backgroundColor: theme.card }];
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={close}>
-      <SafeAreaView style={[styles.root, { backgroundColor: theme.background }]}>
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={back}>
+      {/* iOS shows a page sheet below the status bar; Android shows a full-screen modal, so the bar clears the status
+          bar there. */}
+      <View
+        style={[
+          styles.root,
+          { backgroundColor: theme.background, paddingTop: Platform.OS === 'ios' ? 8 : insets.top, paddingBottom: insets.bottom },
+        ]}>
         <View style={styles.bar}>
-          {step === 'form' ? (
-            <Pressable accessibilityRole="button" hitSlop={12} onPress={() => setStep('pick')} style={styles.barButton}>
-              <MaterialCommunityIcons name="chevron-left" size={24} color={theme.text} />
-              <Text style={[styles.barText, { color: theme.text }]}>{t.back}</Text>
-            </Pressable>
-          ) : (
-            <View />
-          )}
-          <Pressable accessibilityRole="button" hitSlop={12} onPress={close}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t.back}
+            hitSlop={12}
+            onPress={back}
+            style={({ pressed }) => [styles.barButton, { opacity: pressed ? 0.5 : 1 }]}>
+            <MaterialCommunityIcons name="chevron-left" size={28} color={theme.text} />
+            <Text style={[styles.barText, { color: theme.text }]}>{t.back}</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            hitSlop={12}
+            onPress={close}
+            style={({ pressed }) => [styles.barButton, { opacity: pressed ? 0.5 : 1 }]}>
             <Text style={[styles.barText, { color: theme.text }]}>{t.close}</Text>
           </Pressable>
         </View>
@@ -274,7 +289,7 @@ export function AddRecurringSheet({ visible, ownerPath, billers, wallets, onClos
             </>
           )}
         </ScrollView>
-      </SafeAreaView>
+      </View>
     </Modal>
   );
 }
@@ -305,8 +320,8 @@ function StepButton({ icon, disabled, onPress }: { icon: 'minus' | 'plus'; disab
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  bar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 12 },
-  barButton: { flexDirection: 'row', alignItems: 'center' },
+  bar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 4 },
+  barButton: { flexDirection: 'row', alignItems: 'center', minHeight: 48, paddingHorizontal: 8 },
   barText: { fontSize: 17, fontWeight: '600' },
   content: { padding: 20, gap: 16, paddingBottom: 48 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
