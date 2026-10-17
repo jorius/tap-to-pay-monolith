@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { formatMoney } from '@/api/money';
-import type { SummaryRange, VendorSaleView, VendorSummary, VendorView } from '@/api/types';
+import type { SummaryRange, VendorSaleView, VendorSummary, VendorView, VendorWalletView } from '@/api/types';
 import { Screen } from '@/components/screen';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -14,6 +14,7 @@ import { fill, locale, walletSite } from '@/components/vendor/format';
 import { SaleRow } from '@/components/vendor/sale-row';
 import { ErrorState, LoadingState } from '@/components/vendor/states';
 import { VendorGate } from '@/components/vendor/vendor-gate';
+import { defaultFirst, vendorWallets, walletLabel } from '@/components/vendor/wallets';
 import { roleColors } from '@/constants/theme';
 import { useApi } from '@/hooks/use-api';
 import { useTheme } from '@/hooks/use-theme';
@@ -21,6 +22,7 @@ import { defineCopy, useCopy, useLang, type Lang } from '@/i18n';
 
 const copy = defineCopy(
   {
+    wallet: 'Billetera',
     period: 'Periodo',
     ranges: { today: 'Hoy', week: 'Semana', month: 'Mes' },
     balanceTitle: 'Balance según ventas registradas',
@@ -33,7 +35,6 @@ const copy = defineCopy(
     failed: 'Cobros fallidos · {n}',
     notCounted: 'no suman',
     fees: 'Comisiones de red',
-    feesNote: 'El comprador asume la comisión en la cotización; tú recibes el monto completo.',
     netReceived: 'Neto recibido',
     byHour: 'Ventas por hora',
     byDay: 'Ventas por día',
@@ -45,6 +46,7 @@ const copy = defineCopy(
     allTx: 'Ver todos los movimientos',
   },
   {
+    wallet: 'Wallet',
     period: 'Period',
     ranges: { today: 'Today', week: 'Week', month: 'Month' },
     balanceTitle: 'Balance from recorded sales',
@@ -57,7 +59,6 @@ const copy = defineCopy(
     failed: 'Failed charges · {n}',
     notCounted: 'not counted',
     fees: 'Network fees',
-    feesNote: 'The buyer covers the fee in the quote; you receive the full amount.',
     netReceived: 'Net received',
     byHour: 'Sales by hour',
     byDay: 'Sales by day',
@@ -73,28 +74,45 @@ const copy = defineCopy(
 const RANGES: SummaryRange[] = ['today', 'week', 'month'];
 
 export default function DashboardScreen() {
-  return <VendorGate>{(vendor) => <Dashboard vendor={vendor} />}</VendorGate>;
+  return <VendorGate>{(vendor, _replace, reload) => <Dashboard vendor={vendor} reload={reload} />}</VendorGate>;
 }
 
-// The panel (design: Panel y balance). The balance is the service's ledger of PAID sales: Open Payments exposes no wallet
-// balance, so the real one is only ever "in your wallet".
-function Dashboard({ vendor }: { vendor: VendorView }) {
+// The panel (design: Panel y balance), for one receiving wallet at a time so totals never mix assets. The balance is the
+// service's ledger of PAID sales: Open Payments exposes no wallet balance, so the real one is only ever "in your wallet".
+function Dashboard({ vendor, reload }: { vendor: VendorView; reload: () => Promise<void> }) {
   const t = useCopy(copy);
   const theme = useTheme();
   const router = useRouter();
   const [range, setRange] = useState<SummaryRange>('today');
-  const latest = useApi<VendorSaleView[]>(`/vendors/${vendor.id}/sales?limit=3`);
+  const wallets = defaultFirst(vendorWallets(vendor));
+  const [walletId, setWalletId] = useState<string | null>(null);
+  const [refreshes, setRefreshes] = useState(0);
+  // Starts on the receiving wallet; a wallet removed in the Billetera tab falls back to it too.
+  const wallet = wallets.find((w) => w.id === walletId) ?? wallets[0];
+  const latest = useApi<VendorSaleView[]>(`/vendors/${vendor.id}/sales?limit=3&walletId=${wallet.id}`);
 
   return (
-    <Screen>
+    <Screen
+      onRefresh={() => {
+        setRefreshes((n) => n + 1);
+        return Promise.all([reload(), latest.reload()]);
+      }}>
+      {wallets.length > 1 && (
+        <FilterChips
+          label={t.wallet}
+          options={wallets.map((w) => ({ value: w.id, label: walletLabel(w) }))}
+          value={wallet.id}
+          onChange={setWalletId}
+        />
+      )}
       <FilterChips
         label={t.period}
         options={RANGES.map((value) => ({ value, label: t.ranges[value] }))}
         value={range}
         onChange={setRange}
       />
-      {/* Keyed by range so a period switch shows a spinner instead of the previous period's figures. */}
-      <Summary key={range} vendor={vendor} range={range} />
+      {/* Keyed by range, wallet and pull-to-refresh so each shows a spinner and re-reads instead of the previous figures. */}
+      <Summary key={`${range}:${wallet.id}:${refreshes}`} vendorId={vendor.id} wallet={wallet} range={range} />
 
       <View style={styles.section}>
         <Text accessibilityRole="header" style={[styles.h2, { color: theme.text }]}>
@@ -117,11 +135,11 @@ function Dashboard({ vendor }: { vendor: VendorView }) {
   );
 }
 
-function Summary({ vendor, range }: { vendor: VendorView; range: SummaryRange }) {
+function Summary({ vendorId, wallet, range }: { vendorId: string; wallet: VendorWalletView; range: SummaryRange }) {
   const t = useCopy(copy);
   const lang = useLang();
   const theme = useTheme();
-  const { data, error, reload } = useApi<VendorSummary>(`/vendors/${vendor.id}/summary?range=${range}`);
+  const { data, error, reload } = useApi<VendorSummary>(`/vendors/${vendorId}/summary?range=${range}&walletId=${wallet.id}`);
   if (!data) return error ? <ErrorState error={error} onRetry={reload} /> : <LoadingState />;
 
   const money = (amount: string) => formatMoney(amount, data.assetScale, data.assetCode, lang);
@@ -136,7 +154,7 @@ function Summary({ vendor, range }: { vendor: VendorView; range: SummaryRange })
         <Text style={[styles.h3, { color: theme.muted }]}>{t.balanceTitle}</Text>
         <Text style={[styles.balance, { color: theme.text }]}>{money(data.paid.total)}</Text>
         <ThemedText type="caption">{fill(t.balanceNote, { span: t.spans[range] })}</ThemedText>
-        <LinkButton label={t.seeWallet} external onPress={() => Linking.openURL(walletSite(vendor.walletAddress))} />
+        <LinkButton label={t.seeWallet} external onPress={() => Linking.openURL(walletSite(wallet.walletAddress))} />
       </ThemedView>
 
       <View style={[styles.pl, { borderColor: theme.border }]}>
@@ -147,7 +165,6 @@ function Summary({ vendor, range }: { vendor: VendorView; range: SummaryRange })
         <Line label={fill(t.pending, { n: String(data.pending.count) })} value={money(data.pending.total)} />
         <Line label={fill(t.failed, { n: String(data.failed.count) })} value={t.notCounted} muted />
         <Line label={t.fees} value={money('0')} />
-        <ThemedText type="caption">{t.feesNote}</ThemedText>
         <View style={[styles.rule, { backgroundColor: theme.border }]} />
         <Line label={t.netReceived} value={money(data.paid.total)} strong />
       </View>

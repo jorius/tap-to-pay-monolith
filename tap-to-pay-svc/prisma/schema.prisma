@@ -15,23 +15,54 @@ enum SaleStatus {
 }
 
 model Buyer {
+  id              String        @id @default(cuid())
+  name            String
+  // The wallet the buyer pays with by default. A plain id, not a foreign key, to avoid a Buyer <-> BuyerWallet cycle;
+  // the service keeps it pointing at one of this buyer's wallets.
+  defaultWalletId String?
+  createdAt       DateTime      @default(now())
+  wallets         BuyerWallet[]
+  sales           Sale[]
+}
+
+// One wallet address of a buyer (a "card" in the app). Caps and the grant live here, in this wallet's asset.
+model BuyerWallet {
   id               String   @id @default(cuid())
-  name             String
+  buyerId          String
+  buyer            Buyer    @relation(fields: [buyerId], references: [id], onDelete: Cascade)
   walletAddress    String   @unique
+  // The wallet address document's publicName, saved at registration and refreshed at service start.
+  publicName       String?
   assetCode        String
   assetScale       Int
   perPaymentLimit  BigInt
   dailyLimit       BigInt
   grantAccessToken String?
   grantManageUrl   String?
+  // The debitAmount approved per day in the grant, in this wallet's asset; null for grants without limits.
+  grantDailyLimit  BigInt?
   createdAt        DateTime @default(now())
   sales            Sale[]
 }
 
 model Vendor {
+  id              String         @id @default(cuid())
+  name            String
+  // The wallet a new sale receives into unless it names another. A plain id, like Buyer.defaultWalletId.
+  defaultWalletId String?
+  createdAt       DateTime       @default(now())
+  wallets         VendorWallet[]
+  sales           Sale[]
+}
+
+// One receiving wallet address of a vendor. A sale is priced in the asset of the wallet it receives into.
+model VendorWallet {
   id            String   @id @default(cuid())
-  name          String
+  vendorId      String
+  vendor        Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
   walletAddress String   @unique
+  // As BuyerWallet.publicName.
+  publicName    String?
   assetCode     String
   assetScale    Int
   createdAt     DateTime @default(now())
@@ -39,25 +70,31 @@ model Vendor {
 }
 
 model Sale {
-  id                 String     @id @default(cuid())
+  id                 String        @id @default(cuid())
   vendorId           String
-  vendor             Vendor     @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  vendor             Vendor        @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  // The receiving wallet; null once that wallet is removed.
+  vendorWalletId     String?
+  vendorWallet       VendorWallet? @relation(fields: [vendorWalletId], references: [id], onDelete: SetNull)
   buyerId            String?
-  buyer              Buyer?     @relation(fields: [buyerId], references: [id], onDelete: SetNull)
+  buyer              Buyer?        @relation(fields: [buyerId], references: [id], onDelete: SetNull)
+  buyerWalletId      String?
+  buyerWallet        BuyerWallet?  @relation(fields: [buyerWalletId], references: [id], onDelete: SetNull)
   amount             BigInt
   assetCode          String
   assetScale         Int
   debitAmount        BigInt?
   debitAssetCode     String?
   debitAssetScale    Int?
-  status             SaleStatus @default(AWAITING_TAP)
+  status             SaleStatus    @default(AWAITING_TAP)
   incomingPaymentUrl String?
   quoteId            String?
   outgoingPaymentUrl String?
   failureCode        String?
   failureMessage     String?
-  createdAt          DateTime   @default(now())
+  createdAt          DateTime      @default(now())
   paidAt             DateTime?
 
   @@index([buyerId, status, createdAt])
+  @@index([buyerWalletId, status, createdAt])
 }

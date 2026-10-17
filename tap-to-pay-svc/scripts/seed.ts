@@ -3,9 +3,10 @@ import { loadConfig } from '../src/config.js';
 import { createPrisma } from '../src/db/prisma.js';
 import { PrismaRepo } from '../src/db/repos.js';
 import { createOpenPayments } from '../src/open-payments/client.js';
+import { addBuyer } from '../src/services/buyers.js';
 
-// Upserts the buyer and the vendor from SEED_*. Re-running updates name and asset only:
-// limits and the buyer's grant survive.
+// Upserts the buyer and the vendor from SEED_*, with SEED_BUYER_WALLET and SEED_VENDOR_WALLET as their first and
+// default wallets. Re-running updates names and assets only: caps and the wallet's grant survive.
 const cfg = loadConfig(process.env);
 const { SEED_BUYER_NAME, SEED_BUYER_WALLET, SEED_VENDOR_NAME, SEED_VENDOR_WALLET } = cfg;
 if (!SEED_BUYER_NAME || !SEED_BUYER_WALLET || !SEED_VENDOR_NAME || !SEED_VENDOR_WALLET) {
@@ -22,26 +23,28 @@ const op = await createOpenPayments({
 });
 
 try {
-  const buyerWallet = await op.getWalletAddress(SEED_BUYER_WALLET);
   const vendorWallet = await op.getWalletAddress(SEED_VENDOR_WALLET);
 
-  const buyer = await repo.upsertBuyer({
-    name: SEED_BUYER_NAME,
-    walletAddress: SEED_BUYER_WALLET,
-    assetCode: buyerWallet.assetCode,
-    assetScale: buyerWallet.assetScale,
-    perPaymentLimit: BigInt(cfg.SEED_PER_PAYMENT_LIMIT),
-    dailyLimit: BigInt(cfg.SEED_DAILY_LIMIT),
-  });
-  const vendor = await repo.upsertVendor({
-    name: SEED_VENDOR_NAME,
+  const buyer = await addBuyer(
+    { repo, op },
+    {
+      name: SEED_BUYER_NAME,
+      walletAddress: SEED_BUYER_WALLET,
+      perPaymentLimit: cfg.SEED_PER_PAYMENT_LIMIT,
+      dailyLimit: cfg.SEED_DAILY_LIMIT,
+    },
+  );
+  const vendor = await repo.upsertVendorWithWallet(SEED_VENDOR_NAME, {
     walletAddress: SEED_VENDOR_WALLET,
+    publicName: vendorWallet.publicName,
     assetCode: vendorWallet.assetCode,
     assetScale: vendorWallet.assetScale,
   });
 
-  console.log(`buyer  ${buyer.id}  ${buyer.name}  ${buyer.assetCode}/${buyer.assetScale}`);
-  console.log(`vendor ${vendor.id}  ${vendor.name}  ${vendor.assetCode}/${vendor.assetScale}`);
+  const wallet = buyer.wallets.find((w) => w.walletAddress === SEED_BUYER_WALLET)!;
+  console.log(`buyer  ${buyer.id}  ${buyer.name}  wallet ${wallet.id}  ${wallet.assetCode}/${wallet.assetScale}`);
+  const receiving = vendor.wallets.find((w) => w.walletAddress === SEED_VENDOR_WALLET)!;
+  console.log(`vendor ${vendor.id}  ${vendor.name}  wallet ${receiving.id}  ${receiving.assetCode}/${receiving.assetScale}`);
 } finally {
   await prisma.$disconnect();
 }

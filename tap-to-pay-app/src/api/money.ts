@@ -1,3 +1,4 @@
+import type { SaleView } from '@/api/types';
 import type { Lang } from '@/i18n';
 
 // Amounts are digit strings in the asset's smallest unit (SDD section 8): "1200" at scale 2 is "12.00". No floats.
@@ -12,4 +13,11 @@ export function formatMoney(amount: string, scale: number, assetCode: string, la
   const [group, decimal] = lang === 'es' ? ['.', ','] : [',', '.'];
   const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, group);
   return `${frac === undefined ? grouped : grouped + decimal + frac} ${assetCode}`;
+}
+
+// What a sale costs the buyer, in their wallet's asset once the quote is known; the sale amount until then.
+export function buyerAmount(sale: SaleView, lang: Lang) {
+  return sale.debitAmount && sale.debitAssetCode
+    ? formatMoney(sale.debitAmount, sale.debitAssetScale ?? 0, sale.debitAssetCode, lang)
+    : formatMoney(sale.amount, sale.assetScale, sale.assetCode, lang);
 }

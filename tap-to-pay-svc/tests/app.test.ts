@@ -1,6 +1,7 @@
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
+import { WalletError } from '../src/open-payments/types.js';
 import { BUYER_WALLET, makeDeps } from './fakes.js';
 
 const CLIENT = 'https://ilp.test/service';
@@ -23,9 +24,13 @@ describe('HTTP surface', () => {
   it('lists vendors and buyers', async () => {
     const { app } = setup();
     const vendors = await request(app).get('/vendors');
-    expect(vendors.body.data).toEqual([expect.objectContaining({ name: 'Tienda', assetCode: 'USD' })]);
+    expect(vendors.body.data).toEqual([
+      expect.objectContaining({ name: 'Tienda', assetCode: 'USD', wallets: [expect.objectContaining({ isDefault: true })] }),
+    ]);
     const buyers = await request(app).get('/buyers');
-    expect(buyers.body.data).toEqual([expect.objectContaining({ name: 'Ana', hasGrant: true })]);
+    expect(buyers.body.data).toEqual([
+      expect.objectContaining({ name: 'Ana', hasGrant: true, wallets: [expect.objectContaining({ isDefault: true })] }),
+    ]);
   });
 
   it('validates POST /sales', async () => {
@@ -84,6 +89,36 @@ describe('HTTP surface', () => {
     expect(res.body.data).toMatchObject({ status: 'FAILED', failureCode: 'LIMIT_PER_PAYMENT' });
   });
 
+  it("shows a refusal of the buyer's wallet first in their history, which takes a limit", async () => {
+    const { app, buyer, vendor } = setup();
+    const paid = await request(app).post('/sales').send({ vendorId: vendor.id, amount: '1200' });
+    await request(app).post(`/sales/${paid.body.data.id}/charge`).send({ walletAddress: BUYER_WALLET });
+    const over = await request(app).post('/sales').send({ vendorId: vendor.id, amount: '2500' });
+    await request(app).post(`/sales/${over.body.data.id}/charge`).send({ walletAddress: BUYER_WALLET });
+
+    const latest = await request(app).get(`/buyers/${buyer.id}/sales?limit=1`);
+    expect(latest.status).toBe(200);
+    expect(latest.body.data.sales).toEqual([
+      expect.objectContaining({
+        id: over.body.data.id,
+        status: 'FAILED',
+        failureCode: 'LIMIT_PER_PAYMENT',
+        buyerWalletId: buyer.wallet.id,
+      }),
+    ]);
+    expect(latest.body.data.remainingToday).toBe('3800'); // the refusal never counts
+    expect((await request(app).get(`/buyers/${buyer.id}/sales`)).body.data.sales).toHaveLength(2);
+    // The vendor now sees who was refused.
+    const forVendor = await request(app).get(`/vendors/${vendor.id}/sales?limit=1`);
+    expect(forVendor.body.data[0]).toMatchObject({ id: over.body.data.id, buyerName: 'Ana' });
+
+    for (const limit of ['0', '101', 'abc']) {
+      const res = await request(app).get(`/buyers/${buyer.id}/sales?limit=${limit}`);
+      expect(res.status, limit).toBe(400);
+      expect(res.body.error.code, limit).toBe('VALIDATION');
+    }
+  });
+
   it('PATCH /buyers/:id/limits', async () => {
     const { app, buyer } = setup();
     const ok = await request(app)
@@ -95,6 +130,66 @@ describe('HTTP surface', () => {
       .send({ perPaymentLimit: '9000', dailyLimit: '3000' });
     expect(bad.status).toBe(400);
     expect(bad.body.error.message).toBe('perPaymentLimit must be ≤ dailyLimit');
+  });
+
+  it('adds, defaults, caps, filters and removes wallets', async () => {
+    const { app, buyer, vendor, op } = setup();
+    const SAVINGS = 'https://ilp.test/ana-ahorros';
+    op.script.wallets[SAVINGS] = { assetCode: 'EUR' };
+
+    const added = await request(app).post(`/buyers/${buyer.id}/wallets`).send({ walletAddress: SAVINGS });
+    expect(added.status).toBe(201);
+    expect(added.body.data.wallets).toEqual([
+      expect.objectContaining({ id: buyer.wallet.id, isDefault: true }),
+      expect.objectContaining({ walletAddress: SAVINGS, assetCode: 'EUR', hasGrant: false, isDefault: false }),
+    ]);
+    const savingsId = added.body.data.wallets[1].id;
+
+    const switched = await request(app).put(`/buyers/${buyer.id}/default-wallet`).send({ walletId: savingsId });
+    expect(switched.body.data).toMatchObject({ defaultWalletId: savingsId, walletAddress: SAVINGS });
+
+    const capped = await request(app)
+      .patch(`/buyers/${buyer.id}/wallets/${savingsId}/limits`)
+      .send({ perPaymentLimit: '100', dailyLimit: '300' });
+    expect(capped.body.data.wallets[1]).toMatchObject({ perPaymentLimit: '100', dailyLimit: '300' });
+
+    // The first wallet still pays by its address, default or not; the sale shows in its own history only.
+    const sale = await request(app).post('/sales').send({ vendorId: vendor.id, amount: '1200' });
+    await request(app).post(`/sales/${sale.body.data.id}/charge`).send({ walletAddress: BUYER_WALLET });
+    const own = await request(app).get(`/buyers/${buyer.id}/sales?walletId=${buyer.wallet.id}`);
+    expect(own.body.data).toMatchObject({ remainingToday: '3800', sales: [{ buyerWalletId: buyer.wallet.id }] });
+    const other = await request(app).get(`/buyers/${buyer.id}/sales?walletId=${savingsId}`);
+    expect(other.body.data).toEqual({ remainingToday: '300', sales: [] });
+
+    const removed = await request(app).delete(`/buyers/${buyer.id}/wallets/${savingsId}`);
+    expect(removed.body.data).toMatchObject({
+      defaultWalletId: buyer.wallet.id,
+      wallets: [{ id: buyer.wallet.id, isDefault: true }],
+    });
+    const last = await request(app).delete(`/buyers/${buyer.id}/wallets/${buyer.wallet.id}`);
+    expect(last.status).toBe(409);
+    expect(last.body.error).toEqual({ code: 'LAST_WALLET', message: 'A buyer keeps at least one wallet' });
+  });
+
+  it('names the wallet errors', async () => {
+    const { app, buyer, op } = setup();
+    const post = (id: string, body: object) => request(app).post(`/buyers/${id}/wallets`).send(body);
+    const taken = await post(buyer.id, { walletAddress: BUYER_WALLET });
+    expect([taken.status, taken.body.error.code]).toEqual([409, 'WALLET_TAKEN']);
+    const bad = await post(buyer.id, { walletAddress: 'nope' });
+    expect(bad.body.error).toEqual({ code: 'VALIDATION', message: 'walletAddress: Invalid URL' });
+    const unknown = await post('x', { walletAddress: 'https://ilp.test/x' });
+    expect([unknown.status, unknown.body.error.code]).toEqual([404, 'BUYER_NOT_FOUND']);
+    op.script.failOn.wallet = new WalletError('Could not find wallet address', 404);
+    const unreachable = await post(buyer.id, { walletAddress: 'https://ilp.test/x' });
+    expect(unreachable.status).toBe(400);
+    expect(unreachable.body.error).toEqual({ code: 'WALLET_UNREACHABLE', message: 'Could not find wallet address' });
+
+    const foreign = await request(app).put(`/buyers/${buyer.id}/default-wallet`).send({ walletId: 'w-x' });
+    expect(foreign.status).toBe(404);
+    expect(foreign.body.error).toEqual({ code: 'WALLET_NOT_FOUND', message: `Wallet w-x not found for buyer ${buyer.id}` });
+    expect((await request(app).put(`/buyers/${buyer.id}/default-wallet`).send({})).status).toBe(400);
+    expect((await request(app).get(`/buyers/${buyer.id}/sales?walletId=w-x`)).status).toBe(404);
   });
 
   it('names its 404s', async () => {

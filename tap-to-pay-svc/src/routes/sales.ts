@@ -2,15 +2,15 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { chargeSale, createSale, refreshSale, type Deps } from '../services/sales.js';
 
-const createBody = z.object({ vendorId: z.string().min(1), amount: z.string() });
+const createBody = z.object({ vendorId: z.string().min(1), amount: z.string(), walletId: z.string().min(1).optional() });
 const chargeBody = z.object({ walletAddress: z.string().url() });
 
 export function salesRouter(deps: Deps): Router {
   const router = Router();
 
   router.post('/sales', async (req, res) => {
-    const { vendorId, amount } = createBody.parse(req.body);
-    res.status(201).json({ data: await createSale(deps, vendorId, amount), error: null });
+    const { vendorId, amount, walletId } = createBody.parse(req.body);
+    res.status(201).json({ data: await createSale(deps, vendorId, amount, walletId), error: null });
   });
 
   // A refused charge is not an HTTP error: it answers 200 with the sale FAILED.

@@ -17,14 +17,16 @@ import { defineCopy, useCopy } from '@/i18n';
 
 const copy = defineCopy(
   {
-    help: 'Elige tu nombre. Este teléfono será tu tarjeta.',
+    help: 'Elige tu nombre. Este teléfono será tu tarjeta; tus billeteras se administran en Tarjeta.',
+    wallets: (n: number) => (n === 1 ? '1 billetera' : `${n} billeteras`),
     granted: 'Autorizada ✓',
     notGranted: 'Sin autorización · npm run grant:buyer',
     empty: 'El servicio no tiene compradores todavía: corre npm run seed en el portátil.',
     foot: 'La autorización se da una sola vez en la página de tu billetera. Hoy se hace desde el portátil con npm run grant:buyer.',
   },
   {
-    help: 'Pick your name. This phone becomes your card.',
+    help: 'Pick your name. This phone becomes your card; your wallets are managed under Card.',
+    wallets: (n: number) => (n === 1 ? '1 wallet' : `${n} wallets`),
     granted: 'Authorized ✓',
     notGranted: 'Not authorized · npm run grant:buyer',
     empty: 'The service has no buyers yet: run npm run seed on the laptop.',
@@ -32,7 +34,7 @@ const copy = defineCopy(
   },
 );
 
-// Which buyer this phone is (design: BuyerIdentity); the choice is kept on the phone until Settings › Cambiar.
+// Which buyer this phone is (design: BuyerIdentity); kept on the phone until Settings › Administrar.
 export default function BuyerIdentity() {
   const router = useRouter();
   const { update } = useSession();
@@ -47,31 +49,35 @@ export default function BuyerIdentity() {
   };
 
   return (
-    <Screen>
+    <Screen onRefresh={reload}>
       <ThemedText style={{ color: theme.muted }}>{t.help}</ThemedText>
       <LoadState loading={loading} error={error} hasData={data !== undefined} onRetry={reload} />
       {data?.length === 0 && <ThemedText>{t.empty}</ThemedText>}
-      {data?.map((buyer) => (
-        <Pressable
-          key={buyer.id}
-          accessibilityRole="button"
-          accessibilityLabel={`${buyer.name}, ${buyer.assetCode}, ${buyer.hasGrant ? t.granted : t.notGranted}`}
-          onPress={() => pick(buyer)}
-          style={({ pressed }) => [styles.row, { backgroundColor: theme.card, opacity: pressed ? 0.8 : 1 }]}>
-          <Initials name={buyer.name} size={44} background={colors.tint} color={colors.ink} />
-          <View style={styles.info}>
-            <ThemedText style={styles.name}>{buyer.name}</ThemedText>
-            <ThemedText type="caption" numberOfLines={1} style={styles.mono}>
-              {buyer.walletAddress}
-            </ThemedText>
-            <View style={styles.chips}>
-              <Chip label={`${buyer.assetCode} · ${buyer.assetScale}`} />
-              <StatusPill tone={buyer.hasGrant ? 'ok' : 'neutral'} label={buyer.hasGrant ? t.granted : t.notGranted} />
+      {data?.map((buyer) => {
+        // The top-level fields are the default wallet's; an older service sends no wallets list.
+        const count = buyer.wallets?.length ?? 1;
+        return (
+          <Pressable
+            key={buyer.id}
+            accessibilityRole="button"
+            accessibilityLabel={`${buyer.name}, ${t.wallets(count)}, ${buyer.hasGrant ? t.granted : t.notGranted}`}
+            onPress={() => pick(buyer)}
+            style={({ pressed }) => [styles.row, { backgroundColor: theme.card, opacity: pressed ? 0.8 : 1 }]}>
+            <Initials name={buyer.name} size={44} background={colors.tint} color={colors.ink} />
+            <View style={styles.info}>
+              <ThemedText style={styles.name}>{buyer.name}</ThemedText>
+              <ThemedText type="caption" numberOfLines={1} style={styles.mono}>
+                {buyer.walletAddress}
+              </ThemedText>
+              <View style={styles.chips}>
+                <Chip label={`${buyer.assetCode} · ${t.wallets(count)}`} />
+                <StatusPill tone={buyer.hasGrant ? 'ok' : 'neutral'} label={buyer.hasGrant ? t.granted : t.notGranted} />
+              </View>
             </View>
-          </View>
-          <MaterialCommunityIcons name="chevron-right" size={22} color={theme.muted} />
-        </Pressable>
-      ))}
+            <MaterialCommunityIcons name="chevron-right" size={22} color={theme.muted} />
+          </Pressable>
+        );
+      })}
       <ThemedText type="caption">{t.foot}</ThemedText>
     </Screen>
   );

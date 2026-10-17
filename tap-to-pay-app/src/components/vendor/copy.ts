@@ -7,9 +7,9 @@ export const vendorCopy = defineCopy(
     failure: {
       BUYER_UNKNOWN: 'Tarjeta no registrada',
       GRANT_MISSING: 'El comprador no ha autorizado esta terminal (npm run grant:buyer)',
-      ASSET_MISMATCH: 'El comprador paga en {buyer}, el comercio cobra en {vendor}',
       LIMIT_PER_PAYMENT: 'Supera el tope por pago (máx. {amount})',
       LIMIT_DAILY: 'Supera el tope diario (quedan {amount})',
+      GRANT_LIMIT: 'Supera lo autorizado hoy en la billetera del comprador (quedan {amount})',
       WALLET_ERROR: 'La billetera rechazó el cobro: {message}',
     } as Record<string, string>,
     unregistered: 'No registrado',
@@ -24,9 +24,9 @@ export const vendorCopy = defineCopy(
     failure: {
       BUYER_UNKNOWN: 'Card not registered',
       GRANT_MISSING: "Buyer hasn't authorized this terminal (npm run grant:buyer)",
-      ASSET_MISMATCH: 'Buyer pays in {buyer}, vendor charges in {vendor}',
       LIMIT_PER_PAYMENT: 'Over the per-payment limit (max {amount})',
       LIMIT_DAILY: "Over today's limit ({amount} left)",
+      GRANT_LIMIT: "Over what the buyer's wallet authorized today ({amount} left)",
       WALLET_ERROR: 'The wallet refused the charge: {message}',
     },
     unregistered: 'Not registered',

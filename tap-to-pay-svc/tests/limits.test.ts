@@ -1,27 +1,29 @@
 import { describe, expect, it } from 'vitest';
-import type { BuyerRow } from '../src/db/repos.js';
-import { checkBuyer, checkLimits, dayRange, remainingToday, sameAsset } from '../src/services/limits.js';
+import type { BuyerWalletRow } from '../src/db/repos.js';
+import { checkLimits, checkWallet, dayRange, remainingToday, sameAsset } from '../src/services/limits.js';
 
-const buyer: BuyerRow = {
-  id: 'b1',
-  name: 'Ana',
+const wallet: BuyerWalletRow = {
+  id: 'w1',
+  buyerId: 'b1',
   walletAddress: 'https://ilp.test/ana',
+  publicName: null,
   assetCode: 'USD',
   assetScale: 2,
   perPaymentLimit: 2000n,
   dailyLimit: 5000n,
   grantAccessToken: 't',
   grantManageUrl: 'https://auth.test/token',
+  grantDailyLimit: null,
   createdAt: new Date(),
 };
 
-describe('checkBuyer', () => {
-  it('passes a known buyer with a grant', () => {
-    expect(checkBuyer(buyer)).toEqual({ ok: true });
+describe('checkWallet', () => {
+  it('passes a known wallet with a grant', () => {
+    expect(checkWallet(wallet)).toEqual({ ok: true });
   });
 
   it('refuses an unknown card', () => {
-    expect(checkBuyer(null)).toMatchObject({ code: 'BUYER_UNKNOWN', message: 'Card not registered' });
+    expect(checkWallet(null)).toMatchObject({ code: 'BUYER_UNKNOWN', message: 'Card not registered' });
   });
 
   it('refuses without a token or a manage URL', () => {
@@ -29,41 +31,55 @@ describe('checkBuyer', () => {
       code: 'GRANT_MISSING',
       message: "Buyer hasn't authorized this terminal (run npm run grant:buyer)",
     };
-    expect(checkBuyer({ ...buyer, grantAccessToken: null })).toMatchObject(expected);
-    expect(checkBuyer({ ...buyer, grantManageUrl: null })).toMatchObject(expected);
+    expect(checkWallet({ ...wallet, grantAccessToken: null })).toMatchObject(expected);
+    expect(checkWallet({ ...wallet, grantManageUrl: null })).toMatchObject(expected);
   });
 });
 
 describe('checkLimits', () => {
   it('allows within and exactly at both caps', () => {
-    expect(checkLimits(buyer, 1200n, 0n)).toEqual({ ok: true });
-    expect(checkLimits(buyer, 2000n, 3000n)).toEqual({ ok: true });
+    expect(checkLimits(wallet, 1200n, 0n)).toEqual({ ok: true });
+    expect(checkLimits(wallet, 2000n, 3000n)).toEqual({ ok: true });
   });
 
-  it("refuses over the per-payment cap, in the buyer's asset", () => {
-    expect(checkLimits(buyer, 2001n, 0n)).toMatchObject({
+  it("refuses over the per-payment cap, in the wallet's asset", () => {
+    expect(checkLimits(wallet, 2001n, 0n)).toMatchObject({
       code: 'LIMIT_PER_PAYMENT',
       message: 'Over the per-payment limit (max 20.00 USD)',
     });
   });
 
   it('refuses over the daily cap', () => {
-    expect(checkLimits(buyer, 1200n, 4000n)).toMatchObject({
+    expect(checkLimits(wallet, 1200n, 4000n)).toMatchObject({
       code: 'LIMIT_DAILY',
       message: "Over today's limit (10.00 USD left)",
     });
   });
 
   it('checks the per-payment cap before the daily cap', () => {
-    expect(checkLimits(buyer, 2500n, 5000n)).toMatchObject({ code: 'LIMIT_PER_PAYMENT' });
+    expect(checkLimits(wallet, 2500n, 5000n)).toMatchObject({ code: 'LIMIT_PER_PAYMENT' });
+  });
+
+  it("refuses past what the wallet's grant authorized today, inclusive", () => {
+    const granted = { ...wallet, grantDailyLimit: 3000n };
+    expect(checkLimits(granted, 1000n, 2000n)).toEqual({ ok: true });
+    expect(checkLimits(granted, 1200n, 2000n)).toMatchObject({
+      code: 'GRANT_LIMIT',
+      message: 'Over what your wallet authorized today (10.00 USD left)',
+    });
+  });
+
+  it('checks the grant after both caps, and skips it for a grant without limits', () => {
+    expect(checkLimits({ ...wallet, grantDailyLimit: 1000n }, 1200n, 4000n)).toMatchObject({ code: 'LIMIT_DAILY' });
+    expect(checkLimits(wallet, 1200n, 3000n)).toEqual({ ok: true });
   });
 });
 
 describe('sameAsset', () => {
   it('compares code and scale', () => {
-    expect(sameAsset(buyer, { assetCode: 'USD', assetScale: 2 })).toBe(true);
-    expect(sameAsset(buyer, { assetCode: 'EUR', assetScale: 2 })).toBe(false);
-    expect(sameAsset(buyer, { assetCode: 'USD', assetScale: 9 })).toBe(false);
+    expect(sameAsset(wallet, { assetCode: 'USD', assetScale: 2 })).toBe(true);
+    expect(sameAsset(wallet, { assetCode: 'EUR', assetScale: 2 })).toBe(false);
+    expect(sameAsset(wallet, { assetCode: 'USD', assetScale: 9 })).toBe(false);
   });
 });
 

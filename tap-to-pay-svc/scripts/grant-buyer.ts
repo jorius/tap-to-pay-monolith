@@ -8,16 +8,24 @@ import { createPrisma } from '../src/db/prisma.js';
 import { PrismaRepo } from '../src/db/repos.js';
 import { createSdkClient } from '../src/open-payments/client.js';
 import { expectedInteractionHashes, verifyInteractionHash } from '../src/open-payments/hash.js';
+import { grantTarget } from '../src/services/buyers.js';
+import { dayRange } from '../src/services/limits.js';
+import { formatAmount, parseAmount } from '../src/services/money.js';
 
-// The one-time interactive outgoing-payment grant (SDD section 10, step 3).
-// Usage: npm run grant:buyer -- --buyer <id|name|walletAddress>
+// The one-time interactive outgoing-payment grant for ONE wallet (SDD section 10, step 3), capped per day by the
+// wallet itself: --wallet, else the wallet --buyer names, else the buyer's default wallet.
+// Usage: npm run grant:buyer -- --buyer <id|name|walletAddress> [--wallet <url>] [--amount <digits per day>]
 
 const FINISH_PORT = 4100;
 const FINISH_URI = `http://localhost:${FINISH_PORT}/finish`;
+const usage =
+  'Usage: npm run grant:buyer -- --buyer <id|name|walletAddress> [--wallet <url>] [--amount <digits per day>]';
 
-const { values } = parseArgs({ options: { buyer: { type: 'string' } } });
+const { values } = parseArgs({
+  options: { buyer: { type: 'string' }, wallet: { type: 'string' }, amount: { type: 'string' } },
+});
 if (!values.buyer) {
-  console.error('Usage: npm run grant:buyer -- --buyer <id|name|walletAddress>');
+  console.error(usage);
   process.exit(1);
 }
 
@@ -26,28 +34,38 @@ const prisma = createPrisma(cfg.DATABASE_URL);
 const repo = new PrismaRepo(prisma);
 
 try {
-  const buyers = await repo.listBuyers();
-  const key = values.buyer;
-  const buyer =
-    buyers.find((b) => b.id === key) ??
-    buyers.find((b) => b.name === key) ??
-    buyers.find((b) => b.walletAddress === key);
-  if (!buyer) throw new Error(`Buyer "${key}" not found (match is exact: id, name or wallet address)`);
+  const { buyer, wallet: buyerWallet } = grantTarget(await repo.listBuyers(), {
+    buyer: values.buyer,
+    wallet: values.wallet,
+  });
 
   const client = await createSdkClient({
     walletAddressUrl: cfg.OP_CLIENT_WALLET_ADDRESS,
     keyId: cfg.OP_KEY_ID,
     privateKeyPath: cfg.OP_PRIVATE_KEY_PATH,
   });
-  const wallet = await client.walletAddress.get({ url: buyer.walletAddress });
+  const wallet = await client.walletAddress.get({ url: buyerWallet.walletAddress });
   const clientNonce = randomBytes(16).toString('hex');
 
-  // shortcut: no `limits` in the grant, so the token can spend any amount; the service is the only enforcer.
+  // The wallet enforces this per local day, starting at today's local midnight like the service's daily cap.
+  const dailyDebit = values.amount ? parseAmount(values.amount) : buyerWallet.dailyLimit;
+  const authorized = `${formatAmount(dailyDebit, wallet.assetScale)} ${wallet.assetCode}`;
+  const intervalStart = dayRange(new Date(), cfg.DAILY_LIMIT_TZ).start.toISOString();
   const grant = await client.grant.request(
     { url: wallet.authServer },
     {
       access_token: {
-        access: [{ type: 'outgoing-payment', actions: ['create', 'read'], identifier: wallet.id }],
+        access: [
+          {
+            type: 'outgoing-payment',
+            actions: ['create', 'read'],
+            identifier: wallet.id,
+            limits: {
+              debitAmount: { value: dailyDebit.toString(), assetCode: wallet.assetCode, assetScale: wallet.assetScale },
+              interval: `R/${intervalStart}/P1D`,
+            },
+          },
+        ],
       },
       interact: {
         start: ['redirect'],
@@ -58,7 +76,9 @@ try {
   if (!isPendingGrant(grant)) throw new Error('Expected an interactive grant, got a finalized one');
 
   const finished = waitForFinish();
-  console.log(`\nOpen this URL, log in as ${buyer.name} and click Accept:\n\n  ${grant.interact.redirect}\n`);
+  console.log(
+    `\nOpen this URL, log in as ${buyer.name} (${buyerWallet.walletAddress}) and click Accept (up to ${authorized} per day):\n\n  ${grant.interact.redirect}\n`,
+  );
   const params = await finished;
 
   if (params.get('result') === 'grant_rejected') throw new Error('The buyer rejected the grant');
@@ -82,11 +102,14 @@ try {
       { interact_ref: interactRef },
     );
     if (!isFinalizedGrantWithAccessToken(continued)) throw new Error('The grant did not finalize with a token');
-    await repo.updateBuyerGrant(buyer.id, {
+    await repo.updateWalletGrant(buyerWallet.id, {
       grantAccessToken: continued.access_token.value,
       grantManageUrl: continued.access_token.manage,
+      grantDailyLimit: dailyDebit,
     });
-    console.log(`Grant stored for ${buyer.name}. Every tap is now silent.`);
+    console.log(
+      `Grant stored for ${buyer.name}'s ${buyerWallet.walletAddress}: up to ${authorized} per day. Every tap from it is now silent.`,
+    );
   }
 } catch (err) {
   console.error(err instanceof Error ? err.message : err);

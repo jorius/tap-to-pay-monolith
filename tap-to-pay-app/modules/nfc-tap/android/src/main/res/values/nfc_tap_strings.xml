@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="nfc_tap_service_description">Tap to Pay</string>
+  <string name="nfc_tap_aid_group_description">Tap to Pay wallet address</string>
+</resources>

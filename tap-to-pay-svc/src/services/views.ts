@@ -1,5 +1,5 @@
-import type { BuyerView, SaleView, VendorView } from '../contracts.js';
-import type { BuyerRow, SaleRow, VendorRow } from '../db/repos.js';
+import type { BuyerView, BuyerWalletView, SaleView, VendorView } from '../contracts.js';
+import type { BuyerWalletRow, BuyerWithWallets, SaleRow, VendorWithWallets } from '../db/repos.js';
 import { remainingToday } from './limits.js';
 import { formatAmount } from './money.js';
 
@@ -9,7 +9,9 @@ export function saleView(sale: SaleRow, vendorName?: string): SaleView {
     id: sale.id,
     vendorId: sale.vendorId,
     ...(vendorName === undefined ? {} : { vendorName }),
+    vendorWalletId: sale.vendorWalletId,
     buyerId: sale.buyerId,
+    buyerWalletId: sale.buyerWalletId,
     amount: sale.amount.toString(),
     amountFormatted: formatAmount(sale.amount, sale.assetScale),
     assetCode: sale.assetCode,
@@ -29,27 +31,65 @@ export function saleView(sale: SaleRow, vendorName?: string): SaleView {
   };
 }
 
-export function buyerView(buyer: BuyerRow, spentToday: bigint): BuyerView {
+export function buyerWalletView(wallet: BuyerWalletRow, spentToday: bigint, isDefault: boolean): BuyerWalletView {
   return {
-    id: buyer.id,
-    name: buyer.name,
-    walletAddress: buyer.walletAddress,
-    assetCode: buyer.assetCode,
-    assetScale: buyer.assetScale,
-    perPaymentLimit: buyer.perPaymentLimit.toString(),
-    dailyLimit: buyer.dailyLimit.toString(),
+    id: wallet.id,
+    walletAddress: wallet.walletAddress,
+    publicName: wallet.publicName,
+    assetCode: wallet.assetCode,
+    assetScale: wallet.assetScale,
+    perPaymentLimit: wallet.perPaymentLimit.toString(),
+    dailyLimit: wallet.dailyLimit.toString(),
     spentToday: spentToday.toString(),
-    remainingToday: remainingToday(buyer.dailyLimit, spentToday).toString(),
-    hasGrant: buyer.grantAccessToken !== null,
+    remainingToday: remainingToday(wallet.dailyLimit, spentToday).toString(),
+    hasGrant: wallet.grantAccessToken !== null,
+    grantDailyLimit: wallet.grantDailyLimit == null ? null : wallet.grantDailyLimit.toString(),
+    grantRemainingToday:
+      wallet.grantDailyLimit == null ? null : remainingToday(wallet.grantDailyLimit, spentToday).toString(),
+    isDefault,
   };
 }
 
-export function vendorView(vendor: VendorRow): VendorView {
+/** A buyer's or vendor's default wallet; the oldest one if defaultWalletId is unset or stale. */
+export function defaultWallet<W extends { id: string }>(owner: {
+  id: string;
+  defaultWalletId: string | null;
+  wallets: W[];
+}): W {
+  const wallet = owner.wallets.find((w) => w.id === owner.defaultWalletId) ?? owner.wallets[0];
+  if (!wallet) throw new Error(`${owner.id} has no wallet`);
+  return wallet;
+}
+
+/**
+ * `spentToday` is keyed by wallet id. The default wallet's fields are repeated at the top level (SDD section 9), and
+ * its publicName names the buyer when it has one.
+ */
+export function buyerView(buyer: BuyerWithWallets, spentToday: Map<string, bigint>): BuyerView {
+  const main = defaultWallet(buyer);
+  const wallets = buyer.wallets.map((w) => buyerWalletView(w, spentToday.get(w.id) ?? 0n, w.id === main.id));
+  const { id: defaultWalletId, isDefault: _isDefault, ...defaults } = wallets.find((w) => w.id === main.id)!;
+  return { ...defaults, id: buyer.id, name: main.publicName ?? buyer.name, defaultWalletId, wallets };
+}
+
+/** The default wallet's address and asset are repeated at the top level (SDD section 9); its publicName names the vendor. */
+export function vendorView(vendor: VendorWithWallets): VendorView {
+  const main = defaultWallet(vendor);
   return {
     id: vendor.id,
-    name: vendor.name,
-    walletAddress: vendor.walletAddress,
-    assetCode: vendor.assetCode,
-    assetScale: vendor.assetScale,
+    name: main.publicName ?? vendor.name,
+    defaultWalletId: main.id,
+    walletAddress: main.walletAddress,
+    publicName: main.publicName,
+    assetCode: main.assetCode,
+    assetScale: main.assetScale,
+    wallets: vendor.wallets.map((w) => ({
+      id: w.id,
+      walletAddress: w.walletAddress,
+      publicName: w.publicName,
+      assetCode: w.assetCode,
+      assetScale: w.assetScale,
+      isDefault: w.id === main.id,
+    })),
   };
 }

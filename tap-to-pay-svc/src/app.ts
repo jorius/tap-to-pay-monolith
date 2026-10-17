@@ -2,6 +2,7 @@ import express, { type ErrorRequestHandler } from 'express';
 import { ZodError } from 'zod';
 import type { HttpErrorCode } from './contracts.js';
 import { buyersRouter } from './routes/buyers.js';
+import { debugRouter } from './routes/debug.js';
 import { healthRouter } from './routes/health.js';
 import { salesRouter } from './routes/sales.js';
 import { vendorsRouter } from './routes/vendors.js';
@@ -19,6 +20,7 @@ export function createApp(deps: Deps, meta: AppMeta) {
   app.use(vendorsRouter(deps));
   app.use(buyersRouter(deps));
   app.use(salesRouter(deps));
+  app.use(debugRouter(deps, meta));
 
   app.use((req, res) => {
     res.status(404).json(failure('NOT_FOUND', `No route for ${req.method} ${req.path}`));

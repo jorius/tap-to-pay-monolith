@@ -34,6 +34,7 @@ class SdkOpenPayments implements OpenPayments {
       const w = await this.client.walletAddress.get({ url });
       return {
         id: w.id,
+        publicName: w.publicName ?? null,
         authServer: w.authServer,
         resourceServer: w.resourceServer,
         assetCode: w.assetCode,

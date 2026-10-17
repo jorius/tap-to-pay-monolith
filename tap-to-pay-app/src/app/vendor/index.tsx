@@ -6,6 +6,7 @@ import type { VendorView } from '@/api/types';
 import { Screen } from '@/components/screen';
 import { ThemedText } from '@/components/themed-text';
 import { ErrorState, LoadingState } from '@/components/vendor/states';
+import { vendorWallets } from '@/components/vendor/wallets';
 import { roleColors } from '@/constants/theme';
 import { useApi } from '@/hooks/use-api';
 import { useSession } from '@/hooks/use-session';
@@ -14,14 +15,16 @@ import { defineCopy, useCopy } from '@/i18n';
 
 const copy = defineCopy(
   {
-    help: 'Elige tu negocio. Las ventas de esta terminal llegan a su billetera.',
+    help: 'Elige tu negocio. Las ventas de esta terminal llegan a su billetera de cobro.',
     empty: 'El servicio no tiene comercios todavía: corre npm run seed en el portátil.',
     foot: 'La lista viene del servicio. Si no ves tu negocio, pide que lo registren con npm run seed.',
+    wallets: (n: number) => (n === 1 ? '1 billetera' : `${n} billeteras`),
   },
   {
-    help: "Pick your business. This terminal's sales land in its wallet.",
+    help: "Pick your business. This terminal's sales land in its receiving wallet.",
     empty: 'The service has no vendors yet: run npm run seed on the laptop.',
     foot: "The list comes from the service. If your business isn't here, ask for it to be added with npm run seed.",
+    wallets: (n: number) => (n === 1 ? '1 wallet' : `${n} wallets`),
   },
 );
 
@@ -40,32 +43,36 @@ export default function VendorIdentity() {
   };
 
   return (
-    <Screen>
+    <Screen onRefresh={reload}>
       <ThemedText style={{ color: theme.muted }}>{t.help}</ThemedText>
       {data ? null : error ? <ErrorState error={error} onRetry={reload} /> : <LoadingState />}
       {data?.length === 0 && <ThemedText>{t.empty}</ThemedText>}
-      {data?.map((vendor) => (
-        <Pressable
-          key={vendor.id}
-          accessibilityRole="button"
-          accessibilityLabel={`${vendor.name}, ${vendor.assetCode}`}
-          onPress={() => pick(vendor)}
-          style={({ pressed }) => [styles.row, { backgroundColor: theme.card, opacity: pressed ? 0.8 : 1 }]}>
-          <View style={[styles.avatar, { backgroundColor: tint }]}>
-            <Text style={[styles.initials, { color: ink }]}>{initials(vendor.name)}</Text>
-          </View>
-          <View style={styles.info}>
-            <Text style={[styles.name, { color: theme.text }]}>{vendor.name}</Text>
-            <Text numberOfLines={1} style={[styles.mono, { color: theme.muted }]}>
-              {vendor.walletAddress}
-            </Text>
-            <Text style={[styles.asset, { color: theme.text, borderColor: theme.border }]}>
-              {vendor.assetCode} · {vendor.assetScale}
-            </Text>
-          </View>
-          <MaterialCommunityIcons name="chevron-right" size={22} color={theme.muted} />
-        </Pressable>
-      ))}
+      {data?.map((vendor) => {
+        // The address and currency shown are the receiving wallet's (the top-level fields).
+        const count = vendorWallets(vendor).length;
+        return (
+          <Pressable
+            key={vendor.id}
+            accessibilityRole="button"
+            accessibilityLabel={`${vendor.name}, ${vendor.assetCode}, ${t.wallets(count)}`}
+            onPress={() => pick(vendor)}
+            style={({ pressed }) => [styles.row, { backgroundColor: theme.card, opacity: pressed ? 0.8 : 1 }]}>
+            <View style={[styles.avatar, { backgroundColor: tint }]}>
+              <Text style={[styles.initials, { color: ink }]}>{initials(vendor.name)}</Text>
+            </View>
+            <View style={styles.info}>
+              <Text style={[styles.name, { color: theme.text }]}>{vendor.name}</Text>
+              <Text numberOfLines={1} style={[styles.mono, { color: theme.muted }]}>
+                {vendor.walletAddress}
+              </Text>
+              <Text style={[styles.asset, { color: theme.text, borderColor: theme.border }]}>
+                {vendor.assetCode} · {t.wallets(count)}
+              </Text>
+            </View>
+            <MaterialCommunityIcons name="chevron-right" size={22} color={theme.muted} />
+          </Pressable>
+        );
+      })}
       <ThemedText type="caption">{t.foot}</ThemedText>
     </Screen>
   );

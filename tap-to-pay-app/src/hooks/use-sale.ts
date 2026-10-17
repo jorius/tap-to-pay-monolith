@@ -83,7 +83,7 @@ export function useSale(vendorId: string, { simulate }: { simulate: boolean }) {
         console.log(`[nfc] card ignored in ${state}`);
         return;
       }
-      NfcTap?.stopReader();
+      // The reader stays on (the vendor tabs own it), so a second tap during the charge is just ignored above.
       const run = runRef.current;
       go('charging', { walletAddress });
 
@@ -136,6 +136,7 @@ export function useSale(vendorId: string, { simulate }: { simulate: boolean }) {
       try {
         const sale = await api<SaleView>('/sales', { method: 'POST', body: { vendorId, amount } });
         if (runRef.current !== run) return;
+        // Normally already on; re-enabling is harmless and covers a reader that failed to start with the tabs.
         NfcTap?.startReader();
         go('awaiting_tap', { ...RESET, sale });
       } catch (e) {
@@ -151,7 +152,6 @@ export function useSale(vendorId: string, { simulate }: { simulate: boolean }) {
   // Cancel leaves the sale AWAITING_TAP, which never counts toward a limit (SDD §8); New sale uses it too.
   const reset = useCallback(() => {
     runRef.current++;
-    NfcTap?.stopReader();
     go('idle', RESET);
   }, [go]);
 
@@ -175,7 +175,6 @@ export function useSale(vendorId: string, { simulate }: { simulate: boolean }) {
   useEffect(
     () => () => {
       runRef.current++;
-      NfcTap?.stopReader();
     },
     [],
   );

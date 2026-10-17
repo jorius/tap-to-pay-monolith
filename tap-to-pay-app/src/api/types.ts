@@ -1,4 +1,4 @@
-// The views of SDD section 9; keep them in step with the service's src/services/views.ts.
+// The views of SDD section 9; keep them in step with the service's src/contracts.ts.
 export type SaleStatus = 'AWAITING_TAP' | 'CHARGING' | 'PAID' | 'FAILED';
 
 export type SaleView = {
@@ -11,15 +11,24 @@ export type SaleView = {
   assetCode: string;
   assetScale: number;
   status: SaleStatus;
+  // Which of the vendor's wallets receives: the receiving wallet when the sale was created; null once it is removed.
+  vendorWalletId: string | null;
+  // Which of the buyer's wallets paid; null until the claim (and for refusals with no known buyer).
+  buyerWalletId: string | null;
+  // What the buyer pays in the buyer's own asset; null until known (a cross-asset sale learns it from the quote).
+  debitAmount: string | null;
+  debitAmountFormatted: string | null;
+  debitAssetCode: string | null;
+  debitAssetScale: number | null;
   failureCode: string | null;
   failureMessage: string | null;
   createdAt: string;
   paidAt: string | null;
 };
 
-export type BuyerView = {
+// One wallet (card) of a buyer: its own asset, caps and grant.
+export type BuyerWalletView = {
   id: string;
-  name: string;
   walletAddress: string;
   assetCode: string;
   assetScale: number;
@@ -28,14 +37,40 @@ export type BuyerView = {
   spentToday: string;
   remainingToday: string;
   hasGrant: boolean;
+  // What the buyer authorized per day in the wallet's consent (wallet's asset); null for a grant without a debit limit.
+  grantDailyLimit: string | null;
+  grantRemainingToday: string | null;
+  // The name the wallet address publishes (its public document); null when it has none.
+  publicName: string | null;
+  isDefault: boolean;
 };
 
-export type VendorView = {
+// The buyer with every wallet in creation order; the default wallet's fields are repeated at the top level. name is the
+// default wallet's publicName, else the name the buyer was registered with.
+export type BuyerView = Omit<BuyerWalletView, 'id' | 'isDefault'> & {
   id: string;
   name: string;
+  defaultWalletId: string;
+  wallets: BuyerWalletView[];
+};
+
+// One receiving wallet of a vendor; the default one receives new sales.
+export type VendorWalletView = {
+  id: string;
   walletAddress: string;
   assetCode: string;
   assetScale: number;
+  publicName: string | null;
+  isDefault: boolean;
+};
+
+// The vendor with every receiving wallet in creation order; the default wallet's fields are repeated at the top level.
+// name is the default wallet's publicName, else the registered name; sales name both sides the same way.
+export type VendorView = Omit<VendorWalletView, 'id' | 'isDefault'> & {
+  id: string;
+  name: string;
+  defaultWalletId: string;
+  wallets: VendorWalletView[];
 };
 
 export type Health = { ok: boolean; clientWalletAddress: string };

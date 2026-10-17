@@ -188,42 +188,44 @@ An Expo SDK 57 Android app with five file-based routes, no login and no persiste
 
 If the charge request itself fails, the app reads the sale once before calling it failed: a sale that is no longer `AWAITING_TAP` means the charge ran and its answer was lost, so the app polls instead. A second tap during a charge is ignored. Reader mode is not stopped on background: Android pauses and resumes it with the activity.
 
-**Buyer card screen**: *Use this phone as my card* stores the buyer's wallet address as the NFC payload through the native module. It is disabled until the buyer has a grant and the phone reports `android.hardware.nfc.hce`. Active, the screen shows *✓ This phone is your card*, pill `HCE active`, and *Deactivate*, which clears the payload. The payload survives app restarts and reboots; the card answers only while the screen is on, locked is fine. The limits form sends both limits at once; the pill says `Limits saved` or shows the service's error.
+**Buyer card screen**: *Use this phone as my card* stores the buyer's wallet address as the NFC payload through the native module. It is disabled until the buyer has a grant and the phone reports `android.hardware.nfc.hce`. Active, the screen shows *✓ This phone is your card*, pill `HCE active`, and *Deactivate*, which clears the payload. The payload survives app restarts and reboots; the card answers only while the screen is on, locked is fine. The stored payload is the default wallet's address; while the card screen is in front, a tap pays with the wallet on screen if it is authorized (`setShownCard`), and with the default one otherwise or with the app in the background. A popup over the buyer tabs shows each tap's outcome (processing, approved, or refused with the reason) by polling the newest sale every 2 s. The limits form sends both limits at once; the pill says `Limits saved` or shows the service's error.
 
 **The `nfc-tap` native module** (local Expo Module, Kotlin, Android only; `expo-module.config.json` names `expo.modules.nfctap.NfcTapModule`)
 
-- `Apdu.kt`: the proprietary AID `F0494150415901` (`F0` + `IAPAY` + `01`), the `SELECT` command `00A4040007<AID>00`, status words `9000`, `6A82` (not our AID), `6985` (no payload stored), hex helpers, and the payload in `SharedPreferences` because Android starts the card service on its own, possibly with the app process dead.
-- `HceCardService.kt`: a `HostApduService` registered in the module's own `AndroidManifest.xml` with `android.permission.BIND_NFC_SERVICE`, action `android.nfc.cardemulation.action.HOST_APDU_SERVICE`, and `res/xml/nfc_tap_apduservice.xml` with the AID group in category `other` (never competes with Google Wallet) and `requireDeviceUnlock="false"`. On our `SELECT` it answers the payload bytes plus `9000`.
-- `NfcTapModule.kt`: `isSupported`, `isEnabled`, `isHceSupported`, `setCardPayload(string | null)`, `getCardPayload`, `startReader` (reader mode with `FLAG_READER_NFC_A | FLAG_READER_NFC_B | FLAG_READER_SKIP_NDEF_CHECK`, `IsoDep.connect`, 5 s timeout, one `transceive`), `stopReader`, events `onCard { payload }` and `onError { message }`.
+- `Apdu.kt`: the proprietary AID `F0494150415901` (`F0` + `IAPAY` + `01`), the `SELECT` command `00A4040007<AID>00`, status words `9000`, `6A82` (not our AID), `6985` (no payload stored), hex helpers, and the payload in `SharedPreferences` because Android starts the card service on its own, possibly with the app process dead. The card on screen is kept in memory only, with whether the app is in front.
+- `HceCardService.kt`: a `HostApduService` registered in the module's own `AndroidManifest.xml` with `android.permission.BIND_NFC_SERVICE`, action `android.nfc.cardemulation.action.HOST_APDU_SERVICE`, and `res/xml/nfc_tap_apduservice.xml` with the AID group in category `other` (never competes with Google Wallet) and `requireDeviceUnlock="false"`. On our `SELECT` it answers the card on screen while the app is in front, else the stored payload, plus `9000`.
+- `NfcTapModule.kt`: `isSupported`, `isEnabled`, `isHceSupported`, `setCardPayload(string | null)`, `getCardPayload`, `setShownCard(string | null)`, `startReader` (reader mode with `FLAG_READER_NFC_A | FLAG_READER_NFC_B | FLAG_READER_SKIP_NDEF_CHECK`, `IsoDep.connect`, 5 s timeout, one `transceive`), `stopReader`, events `onCard { payload }` and `onError { message }`.
 - Every step logs under the logcat tag `NfcTap`: reader on and off, tag discovered with its tech list, the APDU sent and the raw response, the card answering or refusing, deactivation reason. The JS side logs `[nfc] …` lines (`ReactNativeJS`). Section 14 has the one-terminal-per-phone command.
 - Manifest also declares `uses-permission android.permission.NFC` and `uses-feature android.hardware.nfc` and `.hce` as not required.
 
 **API client**: one `fetch` wrapper that unwraps `{ data, error }`, throws `ApiError(code, message, status)` and turns a network failure into *Can't reach the service at <url>*. The base URL is `EXPO_PUBLIC_API_URL`, inlined at bundle time. Types are the views of section 9, mirrored by hand in `src/api/types.ts`.
 
-**Components**: `Screen` (themed view, safe area, scroll), `ThemedText`, `ThemedView`, `BigButton` (label, colour, `ghost`, `disabled`), `StatusPill` (`wait` / `ok` / `bad` / `neutral`). Theme colours follow the system light/dark scheme. `app.json`: package `co.inteligenciaartesanal.taptopay`, `userInterfaceStyle: automatic`, plugins `expo-router` and `expo-splash-screen`, experiments `typedRoutes` and `reactCompiler`.
+**Components**: `Screen` (themed view, safe area, scroll, pull-to-refresh when given `onRefresh`), `ThemedText`, `ThemedView`, `BigButton` (label, colour, `ghost`, `disabled`), `StatusPill` (`wait` / `ok` / `bad` / `neutral`). Theme colours follow the scheme picked in Settings: the phone's (default), light or dark. `app.json`: package `co.inteligenciaartesanal.taptopay`, `userInterfaceStyle: automatic`, plugins `expo-router` and `expo-splash-screen`, experiments `typedRoutes` and `reactCompiler`.
 
 **Why native and why Android only**: Web NFC cannot emulate a card, and no Expo or React Native library does host card emulation, so the module is written by hand and is the riskiest piece of the app. Start it first. Expo Go cannot load it: always a development build. An iPhone could be a reader through Core NFC with a Swift module and a paid entitlement, never the card.
 
 ## 7. Service design
 
-An Express 5 service of nine endpoints, built as plain functions with dependencies passed in. Request path: route (zod parses the body, no logic) → service function `(deps, …)` (rules and orchestration) → `Repo` (Postgres through Prisma) and `OpenPayments` (wallets through the SDK) → view (bigint to string, formatted amount) → `{ data, error }`.
+An Express 5 service of nineteen endpoints, built as plain functions with dependencies passed in. Request path: route (zod parses the body, no logic) → service function `(deps, …)` (rules and orchestration) → `Repo` (Postgres through Prisma) and `OpenPayments` (wallets through the SDK) → view (bigint to string, formatted amount) → `{ data, error }`.
 
 **Module map**
 
 | File | Responsibility |
 | --- | --- |
-| `src/server.ts` | imports `dotenv/config`, parses config, builds Prisma, the Open Payments client and `Deps`, listens on `0.0.0.0:PORT`; exits 1 if the port is taken (Express 5 passes the listen error to the callback) |
-| `src/app.ts` | `createApp(deps, meta)`: JSON body parsing, four routers, `404 NOT_FOUND` catch-all, the JSON error handler; no `listen`, so supertest drives it |
+| `src/server.ts` | imports `dotenv/config`, parses config, builds Prisma, the Open Payments client and `Deps`, listens on `0.0.0.0:PORT`; exits 1 if the port is taken (Express 5 passes the listen error to the callback); once listening, runs `refreshPublicNames` in the background |
+| `src/app.ts` | `createApp(deps, meta)`: JSON body parsing, five routers, `404 NOT_FOUND` catch-all, the JSON error handler; no `listen`, so supertest drives it |
 | `src/config.ts` | `loadConfig(env)`: one zod schema for every variable, defaults, a readable *Invalid environment* error |
-| `src/routes/{health,vendors,buyers,sales}.ts` | validate, call a service, shape the envelope |
+| `src/routes/{health,vendors,buyers,sales,debug}.ts` | validate, call a service, shape the envelope |
 | `src/services/sales.ts` | `Deps`, `createSale`, `chargeSale` (the orchestration of section 10), `refreshSale` |
-| `src/services/buyers.ts` | `listBuyerViews`, `getBuyer`, `updateLimits`, `listBuyerSales` |
-| `src/services/limits.ts` | pure rules: `canCharge`, `remainingToday`, `dayRange` |
+| `src/services/buyers.ts` | `listBuyerViews`, `getBuyer`, `updateLimits` (the default wallet's), `updateWalletLimits`, `addWallet`, `setDefaultWallet`, `removeWallet`, `listBuyerSales`; for the scripts `addBuyer`, `findBuyer`, `grantTarget` |
+| `src/services/vendors.ts`, `debug.ts` | `listVendorViews`, `vendorSummary`, `listVendorSales`, `addVendorWallet`, `setDefaultVendorWallet`, `removeVendorWallet`, `ownVendorWallet`, `findVendor`; `debugWallets` |
+| `src/services/public-names.ts` | `refreshPublicNames`: at start, saves every wallet's current `publicName`; a wallet it can't read is logged and keeps what it had |
+| `src/services/limits.ts` | pure rules: `checkWallet`, `checkLimits`, `sameAsset`, `remainingToday`, `dayRange` |
 | `src/services/money.ts` | `parseAmount` (`^\d+$`, > 0), `formatAmount`, `toAmount`, `amountToBigInt` |
-| `src/services/views.ts`, `errors.ts` | `saleView`, `buyerView`, `vendorView`; `HttpError(status, code, message)` |
+| `src/services/views.ts`, `errors.ts` | `saleView`, `buyerWalletView`, `buyerView`, `defaultWallet`, `vendorView`; `HttpError(status, code, message)` |
 | `src/db/prisma.ts`, `repos.ts` | `PrismaClient` with the `pg` adapter; the `Repo` interface and `PrismaRepo`, including `transitionSale` and `sumSpent` |
 | `src/open-payments/types.ts`, `client.ts`, `hash.ts` | the `OpenPayments` interface, `WalletInfo`, `WalletError`, `isUnauthorized`, `toWalletError`; the SDK implementation; `verifyInteractionHash` |
-| `scripts/seed.ts`, `scripts/grant-buyer.ts` | upsert buyer and vendor from `SEED_*`; the one-time interactive grant |
+| `scripts/seed.ts`, `grant-buyer.ts`, `add-buyer.ts`, `add-wallet.ts` | upsert buyer and vendor from `SEED_*`, each with its first wallet; the one-time interactive grant of one wallet; a new buyer; one more wallet for an existing buyer or vendor |
 | `prisma/schema.prisma`, `prisma.config.ts`, `prisma/migrations/` | the data model; the config that reads `DATABASE_URL` |
 
 **Dependency injection**: services never import Prisma or the SDK. They receive
@@ -232,6 +234,7 @@ An Express 5 service of nine endpoints, built as plain functions with dependenci
 type Deps = {
   repo: Repo; op: OpenPayments; now: () => Date;
   sleep: (ms: number) => Promise<void>; timeZone: string; pollSeconds: number;
+  defaultLimits: Limits; // caps of a wallet added without its own: SEED_PER_PAYMENT_LIMIT, SEED_DAILY_LIMIT
 };
 ```
 
@@ -239,13 +242,13 @@ Production wires `new PrismaRepo(prisma)`, `createOpenPayments(cfg)`, the real c
 
 **The `OpenPayments` interface**: `getWalletAddress(url) → WalletInfo { id, authServer, resourceServer, assetCode, assetScale }`, `createIncomingPayment(vendor, amount)`, `createQuote(buyer, receiverUrl)`, `createOutgoingPayment(buyer, quoteId, token)`, `rotateToken(manageUrl, token) → { value, manage }`, `getIncomingPayment(url) → { receivedAmount, completed }`. `WalletError` carries `status` and the wallet's `description`.
 
-**The `Repo` interface**: `listVendors`, `getVendor`, `listBuyers`, `getBuyer`, `getBuyerByWallet`, `updateBuyerLimits`, `updateBuyerGrant`, `createSale`, `getSale`, `updateSale`, `transitionSale(id, from, patch) → row | null`, `sumSpent(buyerId, range) → bigint`, `listBuyerSales(buyerId, limit)`.
+**The `Repo` interface**: `listVendors` and `getVendor` (each vendor with its receiving wallets in creation order), `getVendorWalletByAddress`, `upsertVendorWithWallet(name, wallet)`, `createVendorWallet`, `setDefaultVendorWallet`, `deleteVendorWallet`, `listBuyers` and `getBuyer` (each buyer with its wallets in creation order), `getWalletByAddress(url) → wallet with its buyer | null`, `upsertBuyerWithWallet(name, wallet)`, `addWallet`, `setDefaultWallet`, `updateWalletLimits`, `updateWalletGrant`, `updateWalletPublicName`, `updateVendorWalletPublicName`, `deleteWallet`, `createSale`, `getSale`, `updateSale`, `transitionSale(id, from, patch) → row | null`, `sumSpent(walletId, range) → bigint`, `listBuyerSales(buyerId, limit, walletId?)`, `listVendorSales(vendorId, { statuses, from, to, limit, walletId })`.
 
-**The rules** (`checkBuyer` and `checkLimits`, pure): in order, card registered (`BUYER_UNKNOWN`), grant present (`GRANT_MISSING`), `debit ≤ perPaymentLimit` (`LIMIT_PER_PAYMENT`), `spentToday + debit ≤ dailyLimit` (`LIMIT_DAILY`). Both boundaries inclusive. `debit` is what the buyer pays in the buyer's own asset: the sale amount when both wallets share an asset, else the quote's `debitAmount`. Any asset pair is accepted. A same-asset refusal makes no wallet call; a cross-asset cap refusal happens after the quote and before the outgoing payment, so no money moves. A refusal never counts toward the day.
+**The rules** (`checkWallet` and `checkLimits`, pure), all about the one wallet the tapped address names, whichever buyer owns it and whether or not it is that buyer's default: in order, a wallet registered with that address (`BUYER_UNKNOWN`), that wallet's grant present (`GRANT_MISSING`), `debit ≤ perPaymentLimit` (`LIMIT_PER_PAYMENT`), `spentToday + debit ≤ dailyLimit` (`LIMIT_DAILY`), and with a grant limit `spentToday + debit ≤ grantDailyLimit` (`GRANT_LIMIT`). Caps, grant and `spentToday` are that wallet's own. Boundaries inclusive. `debit` is what the buyer pays in the paying wallet's asset: the sale amount when both wallets share an asset, else the quote's `debitAmount`. Any asset pair is accepted. A same-asset refusal makes no wallet call; a cross-asset cap refusal happens after the quote and before the outgoing payment, so no money moves. A refusal never counts toward the day. A refusal of a registered wallet records that wallet and its buyer on the sale, so it reaches the buyer's history; only `BUYER_UNKNOWN` has no payer to record.
 
 **The Open Payments client** (`createOpenPayments`): `createAuthenticatedClient({ walletAddressUrl, keyId, privateKey, requestTimeoutMs: 15000 })` signs every request. Non-interactive `incoming-payment` and `quote` grants are requested on every charge and never cached; a grant that comes back pending is an error (*Wallet asked for interaction on a quote grant*). `incomingPayment.getPublic` reads the vendor's incoming payment without a token. SDK errors become one `WalletError` whose message is the wallet's `description`, else the error message, else *Wallet request failed*.
 
-**Token rotation**: the stored outgoing-payment token is used as is. On `401` or `403` (Rafiki answers an inactive token with `403 Inactive Token`; `401` only means a missing header or bad signature) the service calls `token.rotate` at the stored manage URL, stores the new token and manage URL, and retries the outgoing payment once. A failed rotation keeps the old token and fails the sale with `WALLET_ERROR`.
+**Token rotation**: the stored outgoing-payment token is used as is. On `401` or `403` (Rafiki answers an inactive token with `403 Inactive Token`; `401` only means a missing header or bad signature) the service calls `token.rotate` at the paying wallet's manage URL, stores the new token and manage URL on that wallet, and retries the outgoing payment once. A failed rotation keeps the old token and fails the sale with `WALLET_ERROR`.
 
 **Concurrency**: `Repo.transitionSale(id, from, patch)` is Prisma `updateMany({ where: { id, status: from }, data })`, returning the row when exactly that transition happened and `null` otherwise. The `AWAITING_TAP → CHARGING` claim and every `→ FAILED` write use it, so two simultaneous charges of one sale create one outgoing payment and the loser gets `409 SALE_NOT_CHARGEABLE Sale was already taken`.
 
@@ -253,26 +256,39 @@ Production wires `new PrismaRepo(prisma)`, `createOpenPayments(cfg)`, the real c
 
 ## 8. Data model
 
-Three tables in PostgreSQL, every amount a `BIGINT` in the wallet's smallest unit, and one query that enforces the daily cap. The `Sale` table is the ledger of what the service asked the wallets to do and what they answered; balances live only in the wallets.
+Five tables in PostgreSQL, every amount a `BIGINT` in the wallet's smallest unit, and one query that enforces the daily cap. A buyer is a person; each of their wallet addresses is a `BuyerWallet` row, shown as one card in the app. A vendor receives into one or more `VendorWallet` rows; a sale is priced in the asset of the one it receives into. The `Sale` table is the ledger of what the service asked the wallets to do and what they answered; balances live only in the wallets.
 
-**Units**: integers in the smallest unit everywhere (`1200` with `assetScale 2` is 12.00): `BIGINT` in Postgres, `bigint` in TypeScript, a digit string in JSON. No floats. Asset code and scale are copied from each wallet address document at seed time; a sale copies the vendor's asset at creation. Timestamps are `TIMESTAMP(3)` in UTC. Table and column names are the Prisma model names, so SQL needs double quotes: `"Sale"`, `"buyerId"`.
+**Units**: integers in the smallest unit everywhere (`1200` with `assetScale 2` is 12.00): `BIGINT` in Postgres, `bigint` in TypeScript, a digit string in JSON. No floats. Asset code and scale are copied from each wallet address document when the wallet is added; a sale copies its receiving wallet's asset at creation. Timestamps are `TIMESTAMP(3)` in UTC. Table and column names are the Prisma model names, so SQL needs double quotes: `"Sale"`, `"buyerId"`.
 
 **`Buyer`**
 
 | Column | Type | Notes |
 | --- | --- | --- |
 | `id` | text | cuid, primary key |
-| `name` | text | matched exactly, case-sensitive, by the grant script |
-| `walletAddress` | text, unique | what the buyer phone answers over NFC |
-| `assetCode`, `assetScale` | text, integer | from the wallet |
-| `perPaymentLimit`, `dailyLimit` | bigint | smallest unit; seeded 2000 and 5000 |
-| `grantAccessToken` | text, nullable | the outgoing-payment token; replaced on rotation; a secret |
-| `grantManageUrl` | text, nullable | where the token is rotated |
+| `name` | text | matched exactly, case-sensitive, by the scripts |
+| `defaultWalletId` | text, nullable | the wallet the buyer phone pays with; a plain column, no foreign key (it would make a `Buyer` ↔ `BuyerWallet` cycle), kept valid by the service; a stale or null value reads as the oldest wallet |
 | `createdAt` | timestamp | default now |
 
-`hasGrant` in the API is `grantAccessToken IS NOT NULL`; a charge needs both token and manage URL. Re-seeding updates only name and asset; limits and grant survive.
+**`BuyerWallet`**: one wallet address of a buyer. Caps and the grant live here, in this wallet's asset.
 
-**`Vendor`**: `id`, `name`, `walletAddress` (unique), `assetCode`, `assetScale`, `createdAt`.
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | text | cuid; `w_<buyerId>` for the wallets the migration moved out of `Buyer` |
+| `buyerId` | text, FK `ON DELETE CASCADE` | |
+| `walletAddress` | text, unique | what the buyer phone answers over NFC; unique across all buyers |
+| `publicName` | text, nullable | the wallet address document's `publicName`, saved when added and refreshed at every service start; the default wallet's names the buyer in the API |
+| `assetCode`, `assetScale` | text, integer | from the wallet address document when added |
+| `perPaymentLimit`, `dailyLimit` | bigint | smallest unit; `SEED_PER_PAYMENT_LIMIT` and `SEED_DAILY_LIMIT` (2000 and 5000) unless given |
+| `grantAccessToken` | text, nullable | the outgoing-payment token; replaced on rotation; a secret |
+| `grantManageUrl` | text, nullable | where the token is rotated |
+| `grantDailyLimit` | bigint, nullable | the `debitAmount` per day the buyer approved in this wallet's grant; survives token rotation; null for a grant without limits |
+| `createdAt` | timestamp | default now; wallets list in creation order |
+
+`hasGrant` in the API is `grantAccessToken IS NOT NULL`, per wallet; a charge needs both token and manage URL. Re-seeding updates only names, public names and assets; caps and grants survive. A buyer keeps at least one wallet (`LAST_WALLET`).
+
+**`Vendor`**: `id`, `name`, `defaultWalletId` (text, nullable; the wallet a new sale receives into unless it names another; a plain column like `Buyer.defaultWalletId`, a stale or null value reads as the oldest wallet), `createdAt`.
+
+**`VendorWallet`**: one receiving wallet address of a vendor. `id` (cuid; `vw_<vendorId>` for the wallets the migration moved out of `Vendor`), `vendorId` (FK `ON DELETE CASCADE`), `walletAddress` (unique among vendor wallets, so a buyer's address can also receive), `publicName` (as on `BuyerWallet`; the default wallet's names the vendor in the API), `assetCode`, `assetScale` (from the wallet address document when added), `createdAt` (wallets list in creation order). A vendor keeps at least one wallet (`LAST_WALLET`).
 
 **`Sale`**
 
@@ -280,23 +296,25 @@ Three tables in PostgreSQL, every amount a `BIGINT` in the wallet's smallest uni
 | --- | --- | --- |
 | `id` | text | cuid |
 | `vendorId` | text, FK `ON DELETE RESTRICT` | |
-| `buyerId` | text, nullable, FK `ON DELETE SET NULL` | set at the claim; stays null for rule failures |
-| `amount`, `assetCode`, `assetScale` | bigint, text, integer | the vendor's asset |
+| `vendorWalletId` | text, nullable, FK `ON DELETE SET NULL` | the receiving wallet, set at creation; deleting that wallet keeps the sale with its vendor, and a sale still waiting for a tap then fails on charge |
+| `buyerId` | text, nullable, FK `ON DELETE SET NULL` | set at the claim, or by a rule refusal of a registered wallet; null only for `BUYER_UNKNOWN` |
+| `buyerWalletId` | text, nullable, FK `ON DELETE SET NULL` | the wallet that paid or was refused, set with `buyerId`; deleting that wallet keeps the sale with its buyer |
+| `amount`, `assetCode`, `assetScale` | bigint, text, integer | the receiving wallet's asset |
 | `status` | enum `SaleStatus` | `AWAITING_TAP` (default), `CHARGING`, `PAID`, `FAILED` |
 | `incomingPaymentUrl`, `quoteId`, `outgoingPaymentUrl` | text, nullable | the wallet objects; once `outgoingPaymentUrl` is set the money may be moving |
 | `failureCode`, `failureMessage` | text, nullable | free text; codes in section 9; `MANUAL` by convention for hand fixes |
 | `createdAt` | timestamp | decides which day the sale counts toward |
 | `paidAt` | timestamp, nullable | set on `PAID` |
 
-Index `(buyerId, status, createdAt)` serves the daily sum.
+Index `(buyerWalletId, status, createdAt)` serves the daily sum; `(buyerId, status, createdAt)` the buyer's history.
 
 **Status machine**
 
 ```mermaid
 stateDiagram-v2
-    [*] --> AWAITING_TAP: POST /sales (vendor asset)
-    AWAITING_TAP --> FAILED: a rule refuses (BUYER_UNKNOWN, GRANT_MISSING, LIMIT_*)
-    AWAITING_TAP --> CHARGING: rules pass, conditional claim, buyerId set, amount reserved
+    [*] --> AWAITING_TAP: POST /sales (receiving wallet's asset)
+    AWAITING_TAP --> FAILED: a rule refuses (BUYER_UNKNOWN, GRANT_MISSING, LIMIT_*), a registered payer recorded
+    AWAITING_TAP --> CHARGING: rules pass, conditional claim, buyerId and buyerWalletId set, amount reserved
     CHARGING --> FAILED: wallet 4xx before the outgoing payment (WALLET_ERROR), amount released
     CHARGING --> PAID: receivedAmount covers the sale, paidAt set
     CHARGING --> CHARGING: timeout or 5xx on the outgoing payment, or a read error, amount stays reserved
@@ -308,38 +326,51 @@ stateDiagram-v2
 
 **Today**: the calendar day in `DAILY_LIMIT_TZ` (default `America/Bogota`, UTC−5, no daylight saving). `dayRange(now, zone)` returns the UTC instants of local midnight and the next local midnight, correct on daylight-saving days (23 or 25 hours), by reading the zone offset with `Intl.DateTimeFormat(…, { timeZoneName: 'longOffset' })` and making one correction pass. A sale counts toward the day it was created.
 
-**The daily sum**: `spentToday` = sum of `debitAmount` (the buyer's asset) over the buyer's sales with status in (`CHARGING`, `PAID`) and `createdAt` inside today's range. `FAILED` never counts, so a wallet error releases its amount; `CHARGING` counts, so a charge in flight reserves it. `remainingToday = max(dailyLimit − spentToday, 0)`.
+**The daily sum**, per wallet: `spentToday` = sum of `debitAmount` (that wallet's asset) over the sales that wallet paid with status in (`CHARGING`, `PAID`) and `createdAt` inside today's range. `FAILED` never counts, so a wallet error releases its amount; `CHARGING` counts, so a charge in flight reserves it. `remainingToday = max(dailyLimit − spentToday, 0)`.
 
 ```sql
 SELECT COALESCE(SUM("debitAmount"), 0) FROM "Sale"
-WHERE "buyerId" = $1 AND status IN ('CHARGING', 'PAID')
+WHERE "buyerWalletId" = $1 AND status IN ('CHARGING', 'PAID')
   AND "createdAt" >= $2 AND "createdAt" < $3;
 ```
 
-The sum runs before the claim and outside a transaction: two different sales for one buyer at the same instant can both pass the cap, an accepted shortcut while one terminal charges a card at a time.
+The sum runs before the claim and outside a transaction: two different sales for one wallet at the same instant can both pass the cap, an accepted shortcut while one terminal charges a card at a time.
 
 ## 9. API contract
 
-Nine JSON endpoints on port 4000, one envelope, no authentication. Every response is `{ "data": …, "error": null }` or `{ "data": null, "error": { "code", "message" } }`. Bodies need `content-type: application/json`. Amounts are digit strings in the smallest unit; responses add `amountFormatted`. Ids are cuids, timestamps ISO 8601 UTC. A refused charge is not an HTTP error: it is a `200` whose sale is `FAILED` with a `failureCode`.
+Nineteen JSON endpoints on port 4000, one envelope, no authentication. Every response is `{ "data": …, "error": null }` or `{ "data": null, "error": { "code", "message" } }`. Bodies need `content-type: application/json`. Amounts are digit strings in the smallest unit; responses add `amountFormatted`. Ids are cuids, timestamps ISO 8601 UTC. A refused charge is not an HTTP error: it is a `200` whose sale is `FAILED` with a `failureCode`.
 
 | Method and path | Caller | Body | Success | Returns |
 | --- | --- | --- | --- | --- |
 | `GET /health` | role picker, once | | 200 | `{ ok: true, clientWalletAddress }`; touches neither database nor wallets |
-| `GET /vendors` | `/vendor` | | 200 | `VendorView[]` by name |
-| `GET /buyers` | `/buyer` | | 200 | `BuyerView[]` by name, with limits, today's totals and `hasGrant` |
+| `GET /vendors` | `/vendor` | | 200 | `VendorView[]` by name, each with its receiving wallets; a vendor left without wallets is left out |
+| `POST /vendors/:id/wallets` | `/vendor/wallets` | `{ walletAddress }`, a URL | 201 | `VendorView`; the asset is resolved live from the wallet address document; incoming payments need no grant, so it receives at once; a vendor's first wallet becomes the default |
+| `PUT /vendors/:id/default-wallet` | `/vendor/wallets` | `{ walletId }`, one of this vendor's | 200 | `VendorView`; the wallet new sales receive into |
+| `DELETE /vendors/:id/wallets/:walletId` | `/vendor/wallets` | | 200 | `VendorView`; never the last wallet; removing the default makes the oldest left the default; its sales keep the vendor and lose the wallet link |
+| `GET /buyers` | `/buyer` | | 200 | `BuyerView[]` by name, each with its wallets, limits, today's totals and `hasGrant`; a buyer left without wallets is left out |
 | `GET /buyers/:id` | `/buyer/card` | | 200 | `BuyerView` |
-| `PATCH /buyers/:id/limits` | `/buyer/card` | `{ perPaymentLimit, dailyLimit }`, digits, > 0, per-payment ≤ daily | 200 | `BuyerView`; never needs a new grant |
-| `GET /buyers/:id/sales` | `/buyer/card`, every 3 s | | 200 | `{ remainingToday, sales: SaleView[] }`, last 20, newest first, with `vendorName`; only sales that reached `CHARGING` appear |
-| `POST /sales` | `/vendor/sale` | `{ vendorId, amount }` | 201 | `SaleView` in the vendor's asset, `AWAITING_TAP`, with `vendorName` |
+| `PATCH /buyers/:id/limits` | `/buyer/card` | `{ perPaymentLimit, dailyLimit }`, digits, > 0, per-payment ≤ daily | 200 | `BuyerView`; the default wallet's caps; never needs a new grant |
+| `POST /buyers/:id/wallets` | `/buyer/wallets` | `{ walletAddress }`, a URL | 201 | `BuyerView`; the asset is resolved live from the wallet address document, the caps are `SEED_PER_PAYMENT_LIMIT` and `SEED_DAILY_LIMIT`, no grant yet (`grant:buyer` authorizes it); a buyer's first wallet becomes the default |
+| `PUT /buyers/:id/default-wallet` | `/buyer/wallets` | `{ walletId }`, one of this buyer's | 200 | `BuyerView`; the wallet the phone pays with |
+| `PATCH /buyers/:id/wallets/:walletId/limits` | `/buyer/wallets` | as `PATCH /buyers/:id/limits` | 200 | `BuyerView` |
+| `DELETE /buyers/:id/wallets/:walletId` | `/buyer/wallets` | | 200 | `BuyerView`; never the last wallet; removing the default makes the oldest left the default; its sales keep the buyer and lose the wallet link |
+| `GET /buyers/:id/sales?walletId=&limit=` | `/buyer/history` every 3 s; the tap-outcome popup every 2 s with `limit=1` | | 200 | `{ remainingToday, sales: SaleView[] }`, the last `limit` (1 to 100, default 20), newest first, with `vendorName`; sales that reached `CHARGING` and rule refusals of the buyer's wallets appear; with `walletId` only that wallet's sales and its `remainingToday`, without it every wallet's sales and the default wallet's `remainingToday` |
+| `POST /sales` | `/vendor/sale` | `{ vendorId, amount, walletId? }` | 201 | `SaleView`, `AWAITING_TAP`, with `vendorName`, received into `walletId` (one of this vendor's), else the default wallet, and priced in that wallet's asset |
 | `POST /sales/:id/charge` | `/vendor/sale`, after the tap | `{ walletAddress }`, a URL | 200 | `SaleView` as `PAID`, `CHARGING` or `FAILED`; blocks up to `CHARGE_POLL_SECONDS` plus wallet latency |
 | `GET /sales/:id` | `/vendor/sale`, every 1 s while `CHARGING`, at most 30 | | 200 | `SaleView`; a `CHARGING` sale is re-checked against the wallet first |
+| `GET /vendors/:id/summary?range=today\|week\|month&walletId=` | `/vendor/dashboard` | | 200 | `VendorSummary` of ONE receiving wallet, the default unless `walletId` names another, so totals never mix assets: paid, pending (`CHARGING`) and failed counts, totals in that wallet's asset, `averageTicket`, 24 hourly buckets for today or one per day for the last 7 or 30 local days; default `today` |
+| `GET /vendors/:id/sales?status=&date=YYYY-MM-DD&limit=50&walletId=` | `/vendor/transactions` | | 200 | `VendorSaleView[]`, newest first, every receiving wallet's unless `walletId` names one, each row in its own asset; `AWAITING_TAP` only when asked for; `date` is a local day; `limit` capped at 200 |
+| `GET /debug/wallets` | `/debug` | | 200 | `DebugWallets`: the client address, then every buyer wallet and every vendor wallet (one entry per wallet, under its owner's name), each resolved live (`reachable`, asset, wallet's `error`, buyer `hasGrant`); never throws, never returns a token |
 
 **Views** (built in the service's `src/services/views.ts`, mirrored in the app's `src/api/types.ts`)
 
-- `SaleView`: `id`, `vendorId`, `vendorName?` (only from `POST /sales` and the buyer's history), `buyerId | null`, `amount`, `amountFormatted`, `assetCode`, `assetScale`, `debitAmount | null`, `debitAmountFormatted | null`, `debitAssetCode | null`, `debitAssetScale | null` (what the buyer pays, in the buyer's asset), `status`, `failureCode | null`, `failureMessage | null`, `createdAt`, `paidAt | null`. Wallet URLs are never returned.
-- `BuyerView`: `id`, `name`, `walletAddress`, `assetCode`, `assetScale`, `perPaymentLimit`, `dailyLimit`, `spentToday`, `remainingToday`, `hasGrant`. The token is never returned.
-- `VendorView`: `id`, `name`, `walletAddress`, `assetCode`, `assetScale`.
+- `SaleView`: `id`, `vendorId`, `vendorName?` (only from `POST /sales` and the sales lists; the receiving wallet's `publicName`, else the vendor's registered name), `vendorWalletId | null` (the receiving wallet; null once it is removed), `buyerId | null`, `buyerWalletId | null` (the wallet that paid or was refused; null for `BUYER_UNKNOWN` refusals and once that wallet is removed), `amount`, `amountFormatted`, `assetCode`, `assetScale`, `debitAmount | null`, `debitAmountFormatted | null`, `debitAssetCode | null`, `debitAssetScale | null` (what the buyer pays, in the buyer's asset), `status`, `failureCode | null`, `failureMessage | null`, `createdAt`, `paidAt | null`. Wallet URLs are never returned.
+- `BuyerWalletView`: `id`, `walletAddress`, `publicName | null` (from its wallet address document), `assetCode`, `assetScale`, `perPaymentLimit`, `dailyLimit`, `spentToday`, `remainingToday`, `hasGrant`, `grantDailyLimit | null` (what this wallet's grant authorizes per day), `grantRemainingToday | null` (that minus `spentToday`, floored at zero), `isDefault`. All of it this wallet's own, in its asset.
+- `BuyerView`: `id` (the buyer's), `name` (the default wallet's `publicName`, else the registered name), `defaultWalletId`, `wallets: BuyerWalletView[]` in creation order, plus the default wallet's fields at the top level (`walletAddress` through `grantRemainingToday`, without its `id` and `isDefault`), so a client that knows one wallet per buyer reads it unchanged. Tokens are never returned.
+- `VendorWalletView`: `id`, `walletAddress`, `publicName | null`, `assetCode`, `assetScale`, `isDefault`.
+- `VendorView`: `id` (the vendor's), `name` (the default wallet's `publicName`, else the registered name), `defaultWalletId`, `wallets: VendorWalletView[]` in creation order, plus the default wallet's `walletAddress`, `publicName`, `assetCode` and `assetScale` at the top level, so a client that knows one wallet per vendor reads it unchanged.
 - `Health`: `{ ok: boolean, clientWalletAddress: string }`. `BuyerSales`: `{ remainingToday, sales }`.
+- `VendorSummary`: `range`, `from`, `to`, `assetCode`, `assetScale` (the covered wallet's), `paid { count, total }`, `pending { count, total }`, `failed { count }`, `averageTicket`, `buckets [{ start, count, total }]`. `VendorSaleView`: `SaleView` plus `buyerName | null` (the paying wallet's `publicName`, else the buyer's registered name; null only for `BUYER_UNKNOWN` refusals). `DebugWallets`: `{ checkedAt, database: ok | error, wallets: [{ role, name, walletAddress, reachable, assetCode, assetScale, error, hasGrant }] }`.
 
 **HTTP error codes**
 
@@ -348,10 +379,14 @@ Nine JSON endpoints on port 4000, one envelope, no authentication. Every respons
 | `VALIDATION` | 400 | missing or mistyped field, non-digit or zero amount, `perPaymentLimit > dailyLimit`, `walletAddress` not a URL, malformed JSON |
 | `NOT_FOUND` | 404 | unknown route |
 | `VENDOR_NOT_FOUND`, `BUYER_NOT_FOUND`, `SALE_NOT_FOUND` | 404 | unknown id, named so the app knows what was missing |
+| `WALLET_NOT_FOUND` | 404 | a `walletId` that is not one of this buyer's, or this vendor's, wallets |
+| `WALLET_TAKEN` | 409 | adding a wallet address already registered: among all buyer wallets for a buyer, among all vendor wallets for a vendor |
+| `WALLET_UNREACHABLE` | 400 | the wallet address document could not be read when adding it; the message is the wallet's |
+| `LAST_WALLET` | 409 | removing a buyer's or a vendor's only wallet |
 | `SALE_NOT_CHARGEABLE` | 409 | sale not `AWAITING_TAP` (*Sale is PAID*), or another request claimed it first (*Sale was already taken*) |
 | `INTERNAL` | 500 | anything unexpected, logged as *Unexpected error* |
 
-Exact validation messages: `amount must be digits in the smallest unit, got "12.50"`, `amount must be greater than zero`, `perPaymentLimit must be ≤ dailyLimit`, `Invalid JSON body`, `walletAddress: Invalid URL`, `Buyer <id> not found`.
+Exact validation messages: `amount must be digits in the smallest unit, got "12.50"`, `amount must be greater than zero`, `perPaymentLimit must be ≤ dailyLimit`, `Invalid JSON body`, `walletAddress: Invalid URL`, `Buyer <id> not found`, `Wallet <walletId> not found for buyer <id>` (or `for vendor <id>`), `Wallet <url> is already registered`, `A buyer keeps at least one wallet`, `A vendor keeps at least one wallet`.
 
 **Sale failure codes** (on the sale, HTTP 200, shown verbatim on the vendor phone)
 
@@ -361,6 +396,7 @@ Exact validation messages: `amount must be digits in the smallest unit, got "12.
 | `GRANT_MISSING` | 2nd | *Buyer hasn't authorized this terminal (run npm run grant:buyer)* | none | no |
 | `LIMIT_PER_PAYMENT` | 3rd | *Over the per-payment limit (max 20.00 USD)* | none; cross-asset: incoming payment and quote | no |
 | `LIMIT_DAILY` | 4th | *Over today's limit (10.00 USD left)* | none; cross-asset: incoming payment and quote | no |
+| `GRANT_LIMIT` | 5th, only with `grantDailyLimit` | *Over what your wallet authorized today (10.00 USD left)* | none; cross-asset: incoming payment and quote | no |
 | `WALLET_ERROR` | after the claim | the wallet's `description`, else the error message, else *Wallet request failed* | some | no, released |
 
 ## 10. Flows
@@ -368,8 +404,8 @@ Exact validation messages: `amount must be digits in the smallest unit, got "12.
 **One-time setup** (laptop, before any sale)
 
 1. Test Wallet (`https://wallet.interledger-test.dev`): create the buyer address with play money, the vendor address, and the service address with a developer key pair, or put the key on the vendor's address. Download `private.key`, note the key id. `curl` each wallet address URL: it returns `id`, `authServer`, `resourceServer`, `assetCode`, `assetScale`.
-2. `.env` from `.env.example`; `docker compose up -d`; `npm run db:migrate`; `npm run db:generate`; `npm run seed`. The seed resolves both wallet addresses and copies their asset onto the rows.
-3. `npm run grant:buyer -- --buyer <id|name|walletAddress>`: the script requests an interactive `outgoing-payment` grant at the buyer's auth server with `actions: ['create', 'read']`, `identifier` = the buyer's wallet address, `interact.start: ['redirect']`, `finish: { method: 'redirect', uri: 'http://localhost:4100/finish', nonce }`. It prints the consent URL; you log in as the buyer and click Accept; the wallet redirects to the local one-shot listener with `interact_ref` and `hash`; the script verifies `hash` = SHA-256 of `clientNonce\ninteractNonce\ninteractRef\n<authServer>`, accepting base64 or base64url, padded or not, with or without a trailing slash on the auth server; calls `grant.continue({ url: continue.uri, accessToken: continue.access_token.value }, { interact_ref })`; stores `access_token.value` and `access_token.manage` on the buyer. A click on Reject comes back as `result=grant_rejected`. On a hash mismatch the script prints the received hash and both expected digests, never the token.
+2. `.env` from `.env.example`; `docker compose up -d`; `npm run db:migrate`; `npm run db:generate`; `npm run seed`. The seed resolves both wallet addresses and copies their asset onto the rows; the buyer gets `SEED_BUYER_WALLET` and the vendor `SEED_VENDOR_WALLET` as their first, default wallets.
+3. `npm run grant:buyer -- --buyer <id|name|walletAddress> [--wallet <url>] [--amount <digits per day>]` authorizes one wallet: `--wallet`, else the wallet `--buyer` named by its address, else the buyer's default wallet. The script requests an interactive `outgoing-payment` grant at that wallet's auth server with `actions: ['create', 'read']`, `identifier` = that wallet address, `limits: { debitAmount: { value, assetCode, assetScale }, interval: 'R/<today's local midnight>/P1D' }` (value from `--amount`, else that wallet's `dailyLimit`; the wallet itself then refuses past it each local day), `interact.start: ['redirect']`, `finish: { method: 'redirect', uri: 'http://localhost:4100/finish', nonce }`. It prints the consent URL; you log in as the buyer and click Accept; the wallet redirects to the local one-shot listener with `interact_ref` and `hash`; the script verifies `hash` = SHA-256 of `clientNonce\ninteractNonce\ninteractRef\n<authServer>`, accepting base64 or base64url, padded or not, with or without a trailing slash on the auth server; calls `grant.continue({ url: continue.uri, accessToken: continue.access_token.value }, { interact_ref })`; stores `access_token.value`, `access_token.manage` and the authorized `grantDailyLimit` on that wallet. A person's extra wallet is added with `npm run add:wallet -- --buyer <id|name|walletAddress> --wallet <url>` (or `POST /buyers/:id/wallets`) and authorized the same way, one grant per wallet; `npm run add:buyer` registers a new person. A vendor's extra receiving wallet is added with `npm run add:wallet -- --vendor <id|name|walletAddress> --wallet <url>` (or `POST /vendors/:id/wallets`) and needs no grant. A click on Reject comes back as `result=grant_rejected`. On a hash mismatch the script prints the received hash and both expected digests, never the token.
 4. `npm run dev`; phones built and installed; buyer phone activates the card.
 
 **Each sale**
@@ -381,12 +417,12 @@ sequenceDiagram
     participant S as Service
     participant VW as Vendor's wallet
     participant BW as Buyer's wallet
-    V->>S: POST /sales { vendorId, amount }
+    V->>S: POST /sales { vendorId, amount, walletId? }
     S-->>V: 201 AWAITING_TAP
     V->>B: NFC SELECT AID F0494150415901
     B-->>V: wallet address + 9000
     V->>S: POST /sales/:id/charge { walletAddress }
-    Note over S: rules: buyer, grant, asset, per-payment cap, daily cap
+    Note over S: rules: the tapped wallet, its grant, its per-payment, daily and grant caps
     Note over S: claim AWAITING_TAP → CHARGING (conditional)
     S->>VW: non-interactive incoming-payment grant, create incoming payment (signed)
     S->>BW: non-interactive quote grant, create quote (signed)
@@ -399,14 +435,14 @@ sequenceDiagram
     B->>S: GET /buyers/:id/sales every 3 s
 ```
 
-1. Vendor types the amount and presses *Charge*. The app checks NFC is present and on, calls `POST /sales`; the sale is `AWAITING_TAP` in the vendor's asset. The app turns reader mode on.
+1. Vendor types the amount and presses *Charge*. The app checks NFC is present and on, calls `POST /sales`; the sale is `AWAITING_TAP`, received into the wallet `walletId` names or else the vendor's default, in that wallet's asset. The app turns reader mode on.
 2. The tap. The terminal sends `SELECT AID`; the buyer's `HostApduService` answers the stored wallet address plus `9000`. The reader emits `onCard { payload }`; the app stops the reader and calls `POST /sales/:id/charge`.
-3. The service loads the sale (`404` if unknown, `409` if not `AWAITING_TAP`) and the buyer by wallet address.
-4. Rules in order: buyer exists, grant stored, then, when both wallets share an asset, per-payment cap and daily cap (`sumSpent` over today). A refusal writes `FAILED` with the code and message, conditionally on `AWAITING_TAP`, and answers `200`. No wallet call has been made. When the assets differ, the caps are checked after step 7 against the quote's `debitAmount`; a refusal there writes `FAILED` before any outgoing payment.
-5. The claim: `transitionSale(id, 'AWAITING_TAP', { status: 'CHARGING', buyerId })`. `null` means another request won: `409 Sale was already taken`. From here the amount is reserved against the daily cap.
-6. Vendor side, signed: `walletAddress.get(vendor)`, a non-interactive `incoming-payment` grant at the vendor's auth server, `incomingPayment.create` on the vendor's resource server with `incomingAmount` = the sale amount. The URL is stored on the sale.
+3. The service loads the sale (`404` if unknown, `409` if not `AWAITING_TAP`) and the buyer wallet by address, with its buyer. Any registered wallet pays, default or not; the default is the one the buyer phone is set to answer.
+4. Rules in order, on that wallet: registered, grant stored, then, when it shares the sale's asset, per-payment cap, daily cap (`sumSpent` over that wallet's today) and the grant's daily limit. A refusal writes `FAILED` with the code and message, and for a registered wallet its `buyerId` and `buyerWalletId`, conditionally on `AWAITING_TAP`, and answers `200`. No wallet call has been made and nothing is reserved. When the assets differ, the caps are checked after step 7 against the quote's `debitAmount`; a refusal there writes `FAILED` before any outgoing payment.
+5. The claim: `transitionSale(id, 'AWAITING_TAP', { status: 'CHARGING', buyerId, buyerWalletId })`. `null` means another request won: `409 Sale was already taken`. From here the amount is reserved against the daily cap.
+6. Vendor side, signed, on the sale's receiving wallet: `walletAddress.get(receiving wallet)`, a non-interactive `incoming-payment` grant at its auth server, `incomingPayment.create` on its resource server with `incomingAmount` = the sale amount. The URL is stored on the sale. A receiving wallet removed since the sale was created fails it `WALLET_ERROR` *Receiving wallet was removed*, before any wallet call.
 7. Buyer side, signed: `walletAddress.get(buyer)`, a non-interactive `quote` grant, `quote.create` with `receiver` = the incoming payment and `method: 'ilp'`. The quote id is stored.
-8. The payment: `outgoingPayment.create` on the buyer's resource server with the stored grant token and `quoteId`. On `401` or `403`, rotate the token at the manage URL, store it, retry once. A `4xx` here fails the sale with `WALLET_ERROR`; a timeout (15 s), a dropped connection or a `5xx` leaves it `CHARGING`, because the payment may exist. The URL is stored.
+8. The payment: `outgoingPayment.create` on the buyer's resource server with the paying wallet's grant token and `quoteId`. On `401` or `403`, rotate the token at that wallet's manage URL, store it on that wallet, retry once. A `4xx` here fails the sale with `WALLET_ERROR`; a timeout (15 s), a dropped connection or a `5xx` leaves it `CHARGING`, because the payment may exist. The URL is stored.
 9. Confirmation: `incomingPayment.getPublic` on the vendor's incoming payment once a second for up to `CHARGE_POLL_SECONDS` (default 8). `receivedAmount ≥ amount` writes `PAID` and `paidAt`. The public view never reports `completed` and types `receivedAmount` as optional: a wallet that omits it raises `WalletError("Wallet did not report a received amount")`. A read error ends the wait at once and the sale is returned `CHARGING`.
 10. The vendor app shows *Paid*, or polls `GET /sales/:id` every second up to 30 times while `CHARGING`; each poll re-reads the incoming payment. The buyer app's 3 s poll shows the charge and the new *Left today*.
 
@@ -419,13 +455,13 @@ Any wallet error between the claim and the outgoing payment, and a `4xx` on the 
 | body | `walletAddress` missing or not a URL | `400 VALIDATION` | `AWAITING_TAP` | untouched | none |
 | 3 | unknown sale | `404 SALE_NOT_FOUND` | | | none |
 | 3 | sale not `AWAITING_TAP` | `409 SALE_NOT_CHARGEABLE` *Sale is PAID* | unchanged | | none |
-| 4 | no buyer with this address | `200` | `FAILED BUYER_UNKNOWN` | untouched | none |
-| 4 | no grant token or manage URL | `200` | `FAILED GRANT_MISSING` | untouched | none |
+| 4 | no buyer wallet with this address | `200` | `FAILED BUYER_UNKNOWN` | untouched | none |
+| 4 | that wallet has no grant token or manage URL | `200` | `FAILED GRANT_MISSING` | untouched | none |
 | 7 | cross-asset: the quote's `debitAmount` is over a cap | `200` | `FAILED LIMIT_*` | released | incoming payment and quote; no outgoing payment |
 | 4 | over the per-payment cap | `200` | `FAILED LIMIT_PER_PAYMENT` | untouched | none |
 | 4 | over the daily cap | `200` | `FAILED LIMIT_DAILY` | untouched | none |
 | 5 | another request claimed first | `409` *Sale was already taken* | the winner's | | none by this request |
-| 6 to 8 | any wallet error, or a `4xx` on the outgoing payment, including a failed rotation; also a non-wallet error inside the same block (vendor row gone, a DB write fails) | `200` | `FAILED WALLET_ERROR`, the wallet's message | released | up to the failing one; an unpaid incoming payment may exist on the vendor wallet |
+| 6 to 8 | any wallet error, or a `4xx` on the outgoing payment, including a failed rotation; also a non-wallet error inside the same block (vendor row gone, receiving wallet removed, a DB write fails) | `200` | `FAILED WALLET_ERROR`, the wallet's message | released | up to the failing one; an unpaid incoming payment may exist on the vendor wallet |
 | 8 | `401`/`403` on the outgoing payment | | token rotated and stored, retried once | | rotation |
 | 8 | timeout 15 s, connection lost, `5xx` | `200` | `CHARGING`, `outgoingPaymentUrl` null | reserved | the payment may exist; `GET /sales/:id` flips it to `PAID` when covered |
 | 9 | paid within the window | `200` | `PAID` | spent | all |
@@ -434,7 +470,7 @@ Any wallet error between the claim and the outgoing payment, and a `4xx` on the 
 | any | unexpected error at the claim or after the outgoing payment exists | `500 INTERNAL` | `AWAITING_TAP` or `CHARGING` | maybe reserved | check the wallet before a hand fix |
 | NFC | `onError`: phones apart, not an HCE phone (*Tag is not ISO-DEP*), card deactivated (*Card answered SW 6985*); NFC off on the card phone shows as silence | no call | `AWAITING_TAP` | untouched | none; the reader stays on, tap again |
 
-Rule failures never appear in the buyer's history, since they leave `buyerId` null. Only `CHARGING` and `PAID` count toward the day, by the sale's creation day.
+Rule refusals of a registered wallet appear in its buyer's history as `FAILED` with their `failureCode`, so the buyer app can show the tap was declined; `BUYER_UNKNOWN` ones carry no buyer. Only `CHARGING` and `PAID` count toward the day, by the sale's creation day.
 
 **Resolving a stuck `CHARGING` sale**: read `outgoingPaymentUrl` and `incomingPaymentUrl` from the row, check both in the Test Wallet, then `UPDATE "Sale" SET status = 'PAID', "paidAt" = now() WHERE id = $1` or `SET status = 'FAILED', "failureCode" = 'MANUAL', "failureMessage" = '…'`.
 
@@ -448,7 +484,7 @@ The service and its database are fully trusted; the phones, the network and the 
 | --- | --- | --- |
 | `private.key`, the service's developer private key | `tap-to-pay-svc/`, git-ignored; a secret on the host | in git, in the app |
 | `OP_KEY_ID`, `DATABASE_URL` with the Postgres password | `.env`, git-ignored; `.env.example` carries placeholders | in git |
-| the buyer's `grantAccessToken` and `grantManageUrl` | `Buyer` row; whoever has it can spend from that wallet | returned by the API, logged, on a phone |
+| the buyer's `grantAccessToken` and `grantManageUrl` | `BuyerWallet` row, one per wallet; whoever has it can spend from that wallet | returned by the API, logged, on a phone |
 | non-interactive `incoming-payment` and `quote` tokens | requested per charge, used once | stored |
 | the buyer's wallet login | the wallet provider's consent page | seen by the service |
 
@@ -459,15 +495,16 @@ The service and its database are fully trusted; the phones, the network and the 
 - Every wallet call carries an HTTP message signature made with the service key; the wallets verify it against the service address's JWKS and the grants are issued to that identity.
 - Input is validated with zod at every route and amounts are parsed strictly; unknown ids are named 404s; status transitions are conditional so a race cannot double-charge.
 
+The outgoing-payment grant carries `limits.debitAmount` per local day (section 10, step 3), so the wallet is a second line of defence behind the service's caps: a stolen token spends at most that amount a day, and raising it past the grant means a new consent (the charge refuses with `GRANT_LIMIT` first). Grants made before this change have no limits and are not checked against one.
+
 **Shortcuts, each with its upgrade** (the code marks them with `shortcut:` comments)
 
 | Shortcut | Risk | Remove when |
 | --- | --- | --- |
 | no authentication on the API; identity picked from a list | anyone on the network can read buyers, change limits, create sales | any real user: per-device or per-user tokens, sign-in for buyers and vendors |
 | the card answers a fixed string | a forged card can charge a known address within its limits | MVP: challenge-response. The terminal sends a server nonce in the APDU, the card signs it with a key in Android Keystore registered at enrolment, the service verifies before charging |
-| the outgoing-payment grant has no `limits` | the stored token can spend any amount; the service is the only enforcer | MVP: `limits.debitAmount` with an `interval` in the grant as a second line of defence; raising a limit then means a new consent |
 | grant token stored in plain text | a database leak is a spending key | any real user: encrypt at rest, rotate on schedule |
-| two sales for one buyer at the same instant can both pass the daily cap | the cap is exceeded by one sale | more than one terminal per card: a row or advisory lock on the buyer around the sum and the claim |
+| two sales for one wallet at the same instant can both pass the daily cap | the cap is exceeded by one sale | more than one terminal per card: a row or advisory lock on the wallet around the sum and the claim |
 | a stuck `CHARGING` sale is resolved with SQL by hand | an operator step in production | MVP: a periodic resolver that re-reads incoming payments |
 | cleartext HTTP from the phones to a LAN address | fine on the demo Wi-Fi only | deploy behind HTTPS; release builds refuse cleartext anyway |
 
@@ -487,21 +524,21 @@ Each app reads one `.env`, git-ignored, copied from a committed `.env.example`. 
 | `OP_CLIENT_WALLET_ADDRESS` | none | the service's own wallet address, or the vendor's in the two-address layout |
 | `OP_KEY_ID` | none | the developer key id shown by the Test Wallet |
 | `OP_PRIVATE_KEY_PATH` | `./private.key` | the downloaded private key; the service exits with *Could not load private key* if missing |
-| `SEED_BUYER_NAME`, `SEED_BUYER_WALLET` | none | the seeded buyer |
-| `SEED_VENDOR_NAME`, `SEED_VENDOR_WALLET` | none | the seeded vendor |
-| `SEED_PER_PAYMENT_LIMIT`, `SEED_DAILY_LIMIT` | `2000`, `5000` | in the buyer's smallest unit; with scale 2 that is 20.00 and 50.00 of whatever asset the wallet has |
+| `SEED_BUYER_NAME`, `SEED_BUYER_WALLET` | none | the seeded buyer and its first, default wallet |
+| `SEED_VENDOR_NAME`, `SEED_VENDOR_WALLET` | none | the seeded vendor and its first, default receiving wallet |
+| `SEED_PER_PAYMENT_LIMIT`, `SEED_DAILY_LIMIT` | `2000`, `5000` | in the wallet's smallest unit; with scale 2 that is 20.00 and 50.00 of whatever asset the wallet has; also the caps of any wallet added without its own (`POST /buyers/:id/wallets`, `add:wallet`, `add:buyer`) |
 | `DAILY_LIMIT_TZ` | `America/Bogota` | the calendar day for the daily cap; not validated at startup |
 | `CHARGE_POLL_SECONDS` | `8` | how long a charge request waits for the payment to land |
 
 `loadConfig` validates all of it with one zod schema and names the missing variable in its error.
 
-**`tap-to-pay-app/.env`**: `EXPO_PUBLIC_API_URL=http://<laptop-LAN-IP>:4000`. The laptop address is `ipconfig getifaddr en0`; the value is inlined when Metro bundles, so after changing it restart Metro with `npx expo start --clear`. Without it the app calls `localhost`, which on a phone is the phone. Check from the phone's browser: `http://<LAN-IP>:4000/health` must show JSON.
+**`tap-to-pay-app/.env`**: `EXPO_PUBLIC_API_URL=http://<laptop-LAN-IP>:4000`. The laptop address is `ipconfig getifaddr en0`; the value is inlined when Metro bundles, so after changing it restart Metro with `npx expo start --clear`. Without it the app calls `localhost`, which on a phone is the phone. Check from the phone's browser: `http://<LAN-IP>:4000/health` must show JSON. A release APK needs an HTTPS URL, because Android blocks plain HTTP outside debug builds: forward port 4000 with public visibility (VS Code Ports panel, ngrok, cloudflared) and build with `scripts/build-apk.sh <role> release <https-url>`.
 
 **Postgres**: `docker compose up -d` in `tap-to-pay-svc`, image `postgres:18`, port `55000`, user `postgres`, password `POSTGRES_PASSWORD`, database `tap_to_pay`; a named volume keeps the data, and the buyer's grant, across restarts. Prisma 7 reads the URL from `prisma.config.ts`, which imports `dotenv/config`; the schema's `datasource` block has no `url`. The client is generated into `tap-to-pay-svc/src/generated/prisma`, git-ignored, by `npm run db:generate`; neither `npm install` nor `migrate dev` does it.
 
 **Android build machine**: `JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home`, `ANDROID_HOME=$HOME/Library/Android/sdk`, both exported in `~/.zshrc` with `$JAVA_HOME/bin` first on `PATH`.
 
-**Scripts**. `tap-to-pay-svc`: `dev` (`tsx watch src/server.ts`), `start` (`tsx src/server.ts`), `typecheck` (`tsc --noEmit`), `test` (`vitest run`), `db:migrate` (`prisma migrate dev`), `db:generate` (`prisma generate`), `seed`, `grant:buyer -- --buyer <id|name|walletAddress>` (the `--` is required or npm swallows the flag). `tap-to-pay-app`: `start` (Metro), `android` (`expo run:android`), `lint` (`expo lint`).
+**Scripts**. `tap-to-pay-svc`: `dev` (`tsx watch src/server.ts`), `start` (`tsx src/server.ts`), `typecheck` (`tsc --noEmit`), `test` (`vitest run`), `db:migrate` (`prisma migrate dev`), `db:generate` (`prisma generate`), `seed` (creates or updates the `SEED_*` buyer and vendor with `SEED_BUYER_WALLET` and `SEED_VENDOR_WALLET` as their first, default wallets), `grant:buyer -- --buyer <id|name|walletAddress> [--wallet <url>] [--amount <digits per day>]` (the `--` is required or npm swallows the flag; authorizes one wallet: `--wallet`, else the wallet `--buyer` named by its address, else the default one), `add:buyer -- --name <name> --wallet <url> [--per-payment <digits>] [--daily <digits>]` (a new person with that first, default wallet; re-run with the same address it renames that wallet's buyer and keeps caps and grant), `add:wallet -- (--buyer <ref> | --vendor <ref>) --wallet <url> [--per-payment <digits>] [--daily <digits>]` (exactly one of `--buyer` and `--vendor`: one more wallet, one more card in the app, for an existing buyer, or one more receiving wallet for an existing vendor; the same logic as `POST /buyers/:id/wallets` and `POST /vendors/:id/wallets`; the caps are buyer-only). `--buyer` and `--vendor` match exactly, in order: id, name, then any of its wallet addresses. `tap-to-pay-app`: `start` (Metro), `android` (`expo run:android`), `lint` (`expo lint`).
 
 **Deploying for the demo**: service and Postgres on a public HTTPS host with `tap-to-pay-svc` as the service's root directory, the private key injected as a secret and written to the path in `OP_PRIVATE_KEY_PATH`, the app's `EXPO_PUBLIC_API_URL` pointed at the HTTPS URL and rebuilt. The grant's finish redirect must reach the machine running the grant script, so either run the script on a laptop with `DATABASE_URL` pointing at the deployed database, or add a `/finish` route to the deployed service.
 
@@ -515,8 +552,9 @@ The service is unit-tested against fakes with no network and no database; the ap
 | --- | --- |
 | `money` | `parseAmount` accepts digit strings (`"1200"` → `1200n`, `"007"` → `7n`) and rejects `""`, `"12.50"`, `"-5"`, `"1e3"`, `" 12"`, `"0"`; `formatAmount` for scales 0, 2 and 3 (`"5"`/2 → `0.05`); round-trips |
 | `limits` | `canCharge` allows within and exactly at both caps, refuses over each with the exact messages, checks per-payment first; `remainingToday` floors at zero; `dayRange` on Bogotá boundaries (23:59 and 00:01 on different days), UTC, New York fall-back (25 h) and spring-forward (23 h), Asia/Kolkata half-hour offset |
-| `sales` | `createSale` in the vendor's asset, rejects bad amounts and unknown vendors; the happy path calls the wallets in exact order (vendor wallet, buyer wallet, incoming payment, quote, outgoing payment, one read) and ends `PAID` with all three URLs stored; every rule failure makes no wallet call; `CHARGING` counts toward today, `FAILED` does not; `WALLET_ERROR` keeps the wallet's message and releases the amount; `401` and `403` rotate once, persist, retry; failed rotation keeps the old token; a timeout (`socket hang up`) or `503` on the outgoing payment leaves `CHARGING` reserved; slow completion reads exactly `pollSeconds` times and `refreshSale` later pays it; a read error while polling leaves `CHARGING`; a second charge is `409`; two simultaneous charges create one outgoing payment and the loser gets `409` |
-| `buyers` | totals, limit validation including per-payment above daily, history newest first with vendor names |
+| `sales` | `createSale` in the vendor's asset, rejects bad amounts and unknown vendors; the happy path calls the wallets in exact order (vendor wallet, buyer wallet, incoming payment, quote, outgoing payment, one read) and ends `PAID` with all three URLs stored; every rule failure makes no wallet call, records a registered payer and leaves the buyer's day untouched; `CHARGING` counts toward today, `FAILED` does not; `WALLET_ERROR` keeps the wallet's message and releases the amount; `401` and `403` rotate once, persist, retry; failed rotation keeps the old token; a timeout (`socket hang up`) or `503` on the outgoing payment leaves `CHARGING` reserved; slow completion reads exactly `pollSeconds` times and `refreshSale` later pays it; a read error while polling leaves `CHARGING`; a second charge is `409`; two simultaneous charges create one outgoing payment and the loser gets `409` |
+| `buyers` | totals, limit validation including per-payment above daily, history newest first with vendor names; names from the wallets' public names with the registered-name fallback |
+| `public-names` | the start-up refresh saves each wallet's current `publicName` and keeps the old one for a wallet it can't read |
 | `app` (supertest) | the HTTP surface: health body exactly, lists, `400` for `"12.50"` and a missing amount, `201` on create, charge to `PAID`, second charge `409`, `GET /sales/:id` still `PAID`, buyer's `remainingToday` `3800`, `PATCH` limits, named `404`s and unknown route |
 | `views`, `config`, `hash`, `open-payments-client` | bigint to string and formatting; defaults and the missing-variable error; the interaction hash in base64, base64url, unpadded, trailing slash, and two rejections; `isUnauthorized` on `401` and `403` not `400`; `toWalletError` fallbacks |
 
@@ -583,7 +621,7 @@ A healthy tap, vendor first: `reader: start requested … enabled=true`, `reader
 | `--buyer ana` vs `Ana` | *Buyer "ana" not found* | exact name, or pass the wallet address |
 | daily-cap tests and the real clock | pass one day, fail the next | inject the clock into the fake repo too |
 
-**Useful SQL**: `SELECT id, status, amount, "failureCode", "createdAt" FROM "Sale" ORDER BY "createdAt" DESC LIMIT 10;` · `SELECT name, "grantAccessToken" IS NOT NULL AS has_grant FROM "Buyer";` · `docker compose exec postgres psql -U postgres -d tap_to_pay -c '…'` in `tap-to-pay-svc`.
+**Useful SQL**: `SELECT id, status, amount, "failureCode", "createdAt" FROM "Sale" ORDER BY "createdAt" DESC LIMIT 10;` · `SELECT b.name, w."walletAddress", w."grantAccessToken" IS NOT NULL AS has_grant FROM "BuyerWallet" w JOIN "Buyer" b ON b.id = w."buyerId";` · `docker compose exec postgres psql -U postgres -d tap_to_pay -c '…'` in `tap-to-pay-svc`.
 
 ## 15. Decisions and known limitations
 
@@ -591,7 +629,7 @@ Each entry: what was decided, why, what it costs. Keep or change them on purpose
 
 1. **Backend as source of truth.** All rules and all wallet calls live in the service; the app renders. Cost: no offline mode.
 2. **Consent through a script, not in the app.** The interactive grant is the riskiest Open Payments step; a laptop script de-risks it without deep links or a hosted finish page. Cost: no self-service onboarding. First item on the MVP list.
-3. **No `limits` in the grant.** The buyer changes limits any time without a new consent; one place to read the rules. Cost: the stored token can spend any amount; the database is fully trusted.
+3. **A daily `debitAmount` limit in the grant.** The wallet refuses past what the buyer approved each local day, so a leaked token is capped; the service checks it first and answers `GRANT_LIMIT`. Cost: raising the daily limit past the grant needs a new consent (`grant:buyer -- --amount`); the per-payment and daily caps still change any time.
 4. **Express over NestJS.** Least ceremony for nine endpoints; async errors flow to one handler. Cost: structure by convention.
 5. **Prisma 7 with the `pg` adapter.** Typed queries and migrations. Cost: explicit `prisma generate`, imports from the generated folder, `prisma.config.ts` for the URL.
 6. **Synchronous charge, then polling.** One call usually gives the vendor the answer; no webhooks, jobs or sockets. Cost: a request of several seconds; a sale that never confirms stays `CHARGING` until a hand fix.
@@ -615,7 +653,7 @@ Each entry: what was decided, why, what it costs. Keep or change them on purpose
 
 **Other accepted shortcuts**: non-interactive grants requested per charge, never cached · non-wallet errors inside the wallet block reported as `WALLET_ERROR` · a rotated token is lost if storing it fails · `PAID` writes unconditional (`paidAt` may be written twice in a race) · `DAILY_LIMIT_TZ` not validated at startup · the vendors route reads the repository directly.
 
-**MVP list, after the event**: in-app consent (service starts the grant, app opens the consent URL, finish lands on a service route or deep link) · challenge-response on the tap · grant `limits` and token encryption · authentication · push on `PAID`/`FAILED` · a resolver for stuck sales · per-buyer serialization · cross-currency through the quote's `debitAmount` · token caching · offline messaging and a retry queue on the vendor phone.
+**MVP list, after the event**: in-app consent (service starts the grant, app opens the consent URL, finish lands on a service route or deep link) · challenge-response on the tap · token encryption · authentication · push on `PAID`/`FAILED` · a resolver for stuck sales · per-buyer serialization · cross-currency through the quote's `debitAmount` · token caching · offline messaging and a retry queue on the vendor phone.
 
 ## 16. Build order for the event
 

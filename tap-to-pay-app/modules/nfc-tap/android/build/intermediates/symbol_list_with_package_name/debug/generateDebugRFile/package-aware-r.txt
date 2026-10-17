@@ -1,0 +1,4 @@
+expo.modules.nfctap
+string nfc_tap_aid_group_description
+string nfc_tap_service_description
+xml nfc_tap_apduservice

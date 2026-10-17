@@ -5,6 +5,8 @@ import { loadConfig } from './config.js';
 import { createPrisma } from './db/prisma.js';
 import { PrismaRepo } from './db/repos.js';
 import { createOpenPayments } from './open-payments/client.js';
+import { refreshPublicNames } from './services/public-names.js';
+import type { Deps } from './services/sales.js';
 
 const cfg = loadConfig(process.env);
 
@@ -19,17 +21,16 @@ const op = await createOpenPayments({
   privateKeyPath: cfg.OP_PRIVATE_KEY_PATH,
 });
 
-const app = createApp(
-  {
-    repo: new PrismaRepo(createPrisma(cfg.DATABASE_URL)),
-    op,
-    now: () => new Date(),
-    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-    timeZone: cfg.DAILY_LIMIT_TZ,
-    pollSeconds: cfg.CHARGE_POLL_SECONDS,
-  },
-  { clientWalletAddress: cfg.OP_CLIENT_WALLET_ADDRESS },
-);
+const deps: Deps = {
+  repo: new PrismaRepo(createPrisma(cfg.DATABASE_URL)),
+  op,
+  now: () => new Date(),
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  timeZone: cfg.DAILY_LIMIT_TZ,
+  pollSeconds: cfg.CHARGE_POLL_SECONDS,
+  defaultLimits: { perPaymentLimit: BigInt(cfg.SEED_PER_PAYMENT_LIMIT), dailyLimit: BigInt(cfg.SEED_DAILY_LIMIT) },
+};
+const app = createApp(deps, { clientWalletAddress: cfg.OP_CLIENT_WALLET_ADDRESS });
 
 // Express 5 hands listen errors (EADDRINUSE) to this callback instead of throwing.
 // shortcut: plain HTTP on the LAN; deploy behind HTTPS for anything beyond the demo Wi-Fi.
@@ -39,4 +40,6 @@ app.listen(cfg.PORT, '0.0.0.0', (err) => {
     process.exit(1);
   }
   console.log(`tap-to-pay-svc listening on http://0.0.0.0:${cfg.PORT}`);
+  // In the background: requests are served meanwhile, with the names stored so far.
+  refreshPublicNames(deps).catch((e) => console.warn(`Could not refresh wallet public names: ${e instanceof Error ? e.message : e}`));
 });

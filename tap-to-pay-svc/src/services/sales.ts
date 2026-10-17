@@ -1,5 +1,5 @@
 import type { SaleView } from '../contracts.js';
-import type { Repo, SaleRow } from '../db/repos.js';
+import type { BuyerWalletRow, Limits, Repo, SaleRow } from '../db/repos.js';
 import {
   isClientError,
   isUnauthorized,
@@ -9,9 +9,10 @@ import {
   type WalletInfo,
 } from '../open-payments/types.js';
 import { HttpError } from './errors.js';
-import { checkBuyer, checkLimits, dayRange, sameAsset, type ChargeCheck } from './limits.js';
+import { checkLimits, checkWallet, dayRange, sameAsset, type ChargeCheck } from './limits.js';
 import { parseAmount, toAmount } from './money.js';
-import { saleView } from './views.js';
+import { ownVendorWallet } from './vendors.js';
+import { defaultWallet, saleView } from './views.js';
 
 export type Deps = {
   repo: Repo;
@@ -20,51 +21,62 @@ export type Deps = {
   sleep: (ms: number) => Promise<void>;
   timeZone: string;
   pollSeconds: number;
+  /** Caps a wallet added through the API starts with (SEED_PER_PAYMENT_LIMIT, SEED_DAILY_LIMIT). */
+  defaultLimits: Limits;
 };
 
-export async function createSale(deps: Deps, vendorId: string, amountInput: string): Promise<SaleView> {
+/** POST /sales: received into `walletId`, one of the vendor's wallets, else the default one, and priced in its asset. */
+export async function createSale(
+  deps: Deps,
+  vendorId: string,
+  amountInput: string,
+  walletId?: string,
+): Promise<SaleView> {
   const amount = parseAmount(amountInput);
   const vendor = await deps.repo.getVendor(vendorId);
   if (!vendor) throw new HttpError(404, 'VENDOR_NOT_FOUND', `Vendor ${vendorId} not found`);
+  const wallet = walletId === undefined ? defaultWallet(vendor) : ownVendorWallet(vendor, walletId);
   const sale = await deps.repo.createSale({
     vendorId,
+    vendorWalletId: wallet.id,
     amount,
-    assetCode: vendor.assetCode,
-    assetScale: vendor.assetScale,
+    assetCode: wallet.assetCode,
+    assetScale: wallet.assetScale,
     createdAt: deps.now(),
   });
-  return saleView(sale, vendor.name);
+  return saleView(sale, wallet.publicName ?? vendor.name);
 }
 
 /** The per-sale orchestration of SDD section 10, steps 3 to 9. */
 export async function chargeSale(deps: Deps, saleId: string, walletAddress: string): Promise<SaleView> {
   const { repo, op } = deps;
 
-  // 3. The sale and the buyer.
+  // 3. The sale and the paying wallet, whichever buyer owns it.
   const sale = await loadSale(repo, saleId);
   if (sale.status !== 'AWAITING_TAP') {
     throw new HttpError(409, 'SALE_NOT_CHARGEABLE', `Sale is ${sale.status}`);
   }
   // shortcut: the card answers a fixed address, so a forged card can charge it within its limits.
-  const buyer = await repo.getBuyerByWallet(walletAddress);
+  const wallet = await repo.getWalletByAddress(walletAddress);
 
-  // 4. The rules. Card and grant always come before any wallet call; so do the caps when both
-  // wallets share an asset. In another asset the caps wait for the quote, which knows the debit.
-  const buyerCheck = checkBuyer(buyer);
-  if (!buyerCheck.ok) return refuse(repo, saleId, buyerCheck);
-  const payer = buyer!;
+  // 4. The rules, all on that wallet: card and grant always come before any wallet call; so do the caps when
+  // both wallets share an asset. In another asset the caps wait for the quote, which knows the debit.
+  const walletCheck = checkWallet(wallet);
+  if (!walletCheck.ok) return refuse(repo, saleId, walletCheck, wallet);
+  const payer = wallet!;
   const spentToday = await repo.sumSpent(payer.id, dayRange(deps.now(), deps.timeZone));
   const crossAsset = !sameAsset(payer, sale);
   if (!crossAsset) {
     const limits = checkLimits(payer, sale.amount, spentToday);
-    if (!limits.ok) return refuse(repo, saleId, limits);
+    if (!limits.ok) return refuse(repo, saleId, limits, payer);
   }
 
-  // 5. The claim. From here the debit counts toward the buyer's day (a cross-asset one once quoted).
+  // 5. The claim. From here the debit counts toward that wallet's day (a cross-asset one once quoted).
   // shortcut: the sum above runs outside a lock, so two sales at the same instant can both pass the cap.
   let current = await repo.transitionSale(saleId, 'AWAITING_TAP', {
     status: 'CHARGING',
-    buyerId: payer.id,
+    buyerId: payer.buyerId,
+    buyerWalletId: payer.id,
     ...(crossAsset
       ? {}
       : { debitAmount: sale.amount, debitAssetCode: sale.assetCode, debitAssetScale: sale.assetScale }),
@@ -72,13 +84,15 @@ export async function chargeSale(deps: Deps, saleId: string, walletAddress: stri
   if (!current) throw alreadyTaken();
   const fail = (err: unknown) => failSale(deps, saleId, err);
 
-  // 6 and 7. Incoming payment on the vendor's wallet, quote on the buyer's.
+  // 6 and 7. Incoming payment on the sale's receiving wallet, quote on the buyer's.
   let buyerWallet: WalletInfo;
   let quote: Quote;
   try {
     const vendor = await repo.getVendor(sale.vendorId);
     if (!vendor) throw new Error(`Vendor ${sale.vendorId} not found`);
-    const vendorWallet = await op.getWalletAddress(vendor.walletAddress);
+    const receiving = vendor.wallets.find((w) => w.id === sale.vendorWalletId);
+    if (!receiving) throw new Error('Receiving wallet was removed');
+    const vendorWallet = await op.getWalletAddress(receiving.walletAddress);
     buyerWallet = await op.getWalletAddress(payer.walletAddress);
     const incomingPaymentUrl = await op.createIncomingPayment(
       vendorWallet,
@@ -124,7 +138,7 @@ export async function chargeSale(deps: Deps, saleId: string, walletAddress: stri
       let token: string;
       try {
         const rotated = await op.rotateToken(payer.grantManageUrl!, payer.grantAccessToken!);
-        await repo.updateBuyerGrant(payer.id, {
+        await repo.updateWalletGrant(payer.id, {
           grantAccessToken: rotated.value,
           grantManageUrl: rotated.manage,
         });
@@ -183,12 +197,21 @@ async function failSale(deps: Deps, saleId: string, err: unknown): Promise<SaleV
   return saleView(failed ?? (await loadSale(deps.repo, saleId)));
 }
 
-/** A rule refused before the claim: no wallet call was made and nothing counts toward the day. */
-async function refuse(repo: Repo, saleId: string, check: ChargeCheck & { ok: false }): Promise<SaleView> {
+/**
+ * A rule refused before the claim: no wallet call was made and nothing counts toward the day (no debit, and the sums
+ * only count CHARGING and PAID). A known payer is recorded so the refusal reaches their history; BUYER_UNKNOWN has none.
+ */
+async function refuse(
+  repo: Repo,
+  saleId: string,
+  check: ChargeCheck & { ok: false },
+  payer: BuyerWalletRow | null,
+): Promise<SaleView> {
   const failed = await repo.transitionSale(saleId, 'AWAITING_TAP', {
     status: 'FAILED',
     failureCode: check.code,
     failureMessage: check.message,
+    ...(payer && { buyerId: payer.buyerId, buyerWalletId: payer.id }),
   });
   if (!failed) throw alreadyTaken();
   return saleView(failed);

@@ -1,13 +1,13 @@
 import type { SaleFailureCode } from '../contracts.js';
-import type { BuyerRow } from '../db/repos.js';
+import type { BuyerWalletRow } from '../db/repos.js';
 import { formatAmount } from './money.js';
 
 export type ChargeCheck = { ok: true } | { ok: false; code: SaleFailureCode; message: string };
 
-/** The card is known and its buyer has authorized the service. Pure, no wallet call. */
-export function checkBuyer(buyer: BuyerRow | null): ChargeCheck {
-  if (!buyer) return { ok: false, code: 'BUYER_UNKNOWN', message: 'Card not registered' };
-  if (!buyer.grantAccessToken || !buyer.grantManageUrl) {
+/** The card is a registered wallet and that wallet's grant is stored. Pure, no wallet call. */
+export function checkWallet(wallet: BuyerWalletRow | null): ChargeCheck {
+  if (!wallet) return { ok: false, code: 'BUYER_UNKNOWN', message: 'Card not registered' };
+  if (!wallet.grantAccessToken || !wallet.grantManageUrl) {
     return {
       ok: false,
       code: 'GRANT_MISSING',
@@ -18,30 +18,42 @@ export function checkBuyer(buyer: BuyerRow | null): ChargeCheck {
 }
 
 /**
- * Both caps, inclusive. `debit` is what the buyer pays in the buyer's own asset: the sale amount
- * when both wallets share an asset, else the quote's debitAmount.
+ * The paying wallet's caps, inclusive, then its grant. `debit` is what that wallet pays in its own asset: the sale
+ * amount when both wallets share an asset, else the quote's debitAmount. `spentToday` is that wallet's.
  */
-export function checkLimits(buyer: BuyerRow, debit: bigint, spentToday: bigint): ChargeCheck {
-  if (debit > buyer.perPaymentLimit) {
+export function checkLimits(wallet: BuyerWalletRow, debit: bigint, spentToday: bigint): ChargeCheck {
+  if (debit > wallet.perPaymentLimit) {
     return {
       ok: false,
       code: 'LIMIT_PER_PAYMENT',
-      message: `Over the per-payment limit (max ${formatAmount(buyer.perPaymentLimit, buyer.assetScale)} ${buyer.assetCode})`,
+      message: `Over the per-payment limit (max ${formatAmount(wallet.perPaymentLimit, wallet.assetScale)} ${wallet.assetCode})`,
     };
   }
-  if (spentToday + debit > buyer.dailyLimit) {
-    const left = remainingToday(buyer.dailyLimit, spentToday);
+  if (spentToday + debit > wallet.dailyLimit) {
+    const left = remainingToday(wallet.dailyLimit, spentToday);
     return {
       ok: false,
       code: 'LIMIT_DAILY',
-      message: `Over today's limit (${formatAmount(left, buyer.assetScale)} ${buyer.assetCode} left)`,
+      message: `Over today's limit (${formatAmount(left, wallet.assetScale)} ${wallet.assetCode} left)`,
+    };
+  }
+  // The wallet itself refuses past the grant's debitAmount, so refuse first with a clear reason. A grant without
+  // limits (grantDailyLimit null) is not checked here.
+  if (wallet.grantDailyLimit != null && spentToday + debit > wallet.grantDailyLimit) {
+    const left = remainingToday(wallet.grantDailyLimit, spentToday);
+    return {
+      ok: false,
+      code: 'GRANT_LIMIT',
+      message: `Over what your wallet authorized today (${formatAmount(left, wallet.assetScale)} ${wallet.assetCode} left)`,
     };
   }
   return { ok: true };
 }
 
-export function sameAsset(buyer: BuyerRow, sale: { assetCode: string; assetScale: number }): boolean {
-  return buyer.assetCode === sale.assetCode && buyer.assetScale === sale.assetScale;
+type Asset = { assetCode: string; assetScale: number };
+
+export function sameAsset(a: Asset, b: Asset): boolean {
+  return a.assetCode === b.assetCode && a.assetScale === b.assetScale;
 }
 
 export function remainingToday(dailyLimit: bigint, spentToday: bigint): bigint {
@@ -53,6 +65,12 @@ export type DayRange = { start: Date; end: Date };
 
 /** UTC instants of local midnight today and the next local midnight in `timeZone`. */
 export function dayRange(now: Date, timeZone: string): DayRange {
+  const { year, month, day } = localDate(now, timeZone);
+  return { start: localInstant(year, month, day, 0, timeZone), end: localInstant(year, month, day + 1, 0, timeZone) };
+}
+
+/** The calendar date `now` falls on in `timeZone`; month is 1 to 12. */
+export function localDate(now: Date, timeZone: string): { year: number; month: number; day: number } {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone,
     year: 'numeric',
@@ -60,14 +78,14 @@ export function dayRange(now: Date, timeZone: string): DayRange {
     day: '2-digit',
   }).formatToParts(now);
   const get = (type: string) => Number(parts.find((p) => p.type === type)!.value);
-  const [y, m, d] = [get('year'), get('month'), get('day')];
-  return { start: localMidnight(y, m, d, timeZone), end: localMidnight(y, m, d + 1, timeZone) };
+  return { year: get('year'), month: get('month'), day: get('day') };
 }
 
-function localMidnight(year: number, month: number, day: number, timeZone: string): Date {
-  const wall = Date.UTC(year, month - 1, day);
+/** The UTC instant of a local wall-clock hour in `timeZone`; day and hour may overflow, Date.UTC rolls them over. */
+export function localInstant(year: number, month: number, day: number, hour: number, timeZone: string): Date {
+  const wall = Date.UTC(year, month - 1, day, hour);
   const first = wall - offsetMs(new Date(wall), timeZone);
-  // One correction pass: the offset at the guess can differ from the offset at midnight on DST days.
+  // One correction pass: the offset at the guess can differ from the offset at that hour on DST days.
   const second = wall - offsetMs(new Date(first), timeZone);
   return new Date(second);
 }

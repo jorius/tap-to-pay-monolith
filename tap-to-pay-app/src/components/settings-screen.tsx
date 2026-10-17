@@ -12,7 +12,7 @@ import { appRole, type AppRole } from '@/config/role';
 import { Brand, roleColors } from '@/constants/theme';
 import { useApi } from '@/hooks/use-api';
 import { useHealth } from '@/hooks/use-health';
-import { useSession } from '@/hooks/use-session';
+import { useSession, type ThemeChoice } from '@/hooks/use-session';
 import { useTheme } from '@/hooks/use-theme';
 import { defineCopy, useCopy, type Lang } from '@/i18n';
 
@@ -21,9 +21,13 @@ const copy = defineCopy(
     language: 'Idioma',
     spanish: 'Español (predeterminado)',
     langNote: 'La app abre en español aunque el teléfono esté en otro idioma. Tu elección se guarda en este teléfono.',
+    theme: 'Tema',
+    themes: { system: 'Como el teléfono (predeterminado)', light: 'Claro', dark: 'Oscuro' },
     thisPhone: 'Este teléfono',
     who: { vendor: 'Comercio', buyer: 'Comprador' },
     change: 'Cambiar',
+    wallets: (n: number) => (n === 1 ? '1 billetera' : `${n} billeteras`),
+    manage: 'Administrar',
     service: 'Servicio',
     apiUrl: 'URL de la API',
     checking: 'Verificando…',
@@ -40,9 +44,13 @@ const copy = defineCopy(
     language: 'Language',
     spanish: 'Español (default)',
     langNote: 'The app opens in Spanish even when the phone uses another language. Your choice is kept on this phone.',
+    theme: 'Theme',
+    themes: { system: 'Same as the phone (default)', light: 'Light', dark: 'Dark' },
     thisPhone: 'This phone',
     who: { vendor: 'Vendor', buyer: 'Buyer' },
     change: 'Change',
+    wallets: (n: number) => (n === 1 ? '1 wallet' : `${n} wallets`),
+    manage: 'Manage',
     service: 'Service',
     apiUrl: 'API URL',
     checking: 'Checking…',
@@ -62,6 +70,8 @@ const LANGS: { lang: Lang; label: (t: (typeof copy)['es']) => string }[] = [
   { lang: 'en', label: () => 'English' },
 ];
 
+const THEMES: ThemeChoice[] = ['system', 'light', 'dark'];
+
 // Settings of both builds (design: Settings); the role picks colours and which identity "Este teléfono" shows.
 export function SettingsScreen({ role }: { role: AppRole }) {
   const session = useSession();
@@ -72,7 +82,9 @@ export function SettingsScreen({ role }: { role: AppRole }) {
   const router = useRouter();
   const vendors = useApi<VendorView[]>(role === 'vendor' ? '/vendors' : null);
   const buyer = useApi<BuyerView>(role === 'buyer' && session.buyerId ? `/buyers/${session.buyerId}` : null);
-  const name = role === 'vendor' ? vendors.data?.find((v) => v.id === session.vendorId)?.name : buyer.data?.name;
+  const owner = role === 'vendor' ? vendors.data?.find((v) => v.id === session.vendorId) : buyer.data;
+  // "Ana · 2 billeteras" (an older service without a wallets list has just the one).
+  const phone = owner ? `${owner.name} · ${t.wallets(owner.wallets?.length ?? 1)}` : '—';
   const version = Constants.expoConfig?.version ?? '';
   const connection =
     health.status === 'connected'
@@ -82,41 +94,41 @@ export function SettingsScreen({ role }: { role: AppRole }) {
         : { label: t.unreachable, dot: Brand.bad, ink: theme.badInk };
 
   return (
-    <Screen>
+    <Screen onRefresh={() => Promise.all([vendors.reload(), buyer.reload()])}>
       <Section title={t.language}>
-        <View accessibilityRole="radiogroup" accessibilityLabel={t.language} style={styles.options}>
-          {LANGS.map(({ lang, label }) => {
-            const checked = session.lang === lang;
-            return (
-              <Pressable
-                key={lang}
-                accessibilityRole="radio"
-                accessibilityState={{ checked }}
-                onPress={() => session.update({ lang })}
-                style={[styles.option, { backgroundColor: theme.card }]}>
-                <View style={[styles.radio, { borderColor: checked ? colors.ink : theme.muted }]}>
-                  {checked && <View style={[styles.radioDot, { backgroundColor: colors.ink }]} />}
-                </View>
-                <ThemedText style={styles.optionText}>{label(t)}</ThemedText>
-              </Pressable>
-            );
-          })}
-        </View>
+        <Choices
+          label={t.language}
+          options={LANGS.map(({ lang, label }) => ({ value: lang, label: label(t) }))}
+          value={session.lang}
+          onChange={(lang) => session.update({ lang })}
+          ink={colors.ink}
+        />
         <ThemedText type="caption">{t.langNote}</ThemedText>
+      </Section>
+
+      <Section title={t.theme}>
+        <Choices
+          label={t.theme}
+          options={THEMES.map((value) => ({ value, label: t.themes[value] }))}
+          value={session.theme}
+          onChange={(value) => session.update({ theme: value })}
+          ink={colors.ink}
+        />
       </Section>
 
       <Section title={t.thisPhone}>
         <View style={[styles.row, { backgroundColor: theme.card }]}>
           <View style={styles.grow}>
             <ThemedText type="caption">{t.who[role]}</ThemedText>
-            <ThemedText style={styles.strong}>{name ?? '—'}</ThemedText>
+            <ThemedText style={styles.strong}>{phone}</ThemedText>
           </View>
+          {/* A buyer's wallets are added, removed and made default on the card screen. */}
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`${t.change}: ${t.who[role]}`}
-            onPress={() => session.update(role === 'vendor' ? { vendorId: null } : { buyerId: null })}
+            accessibilityLabel={role === 'vendor' ? `${t.change}: ${t.who.vendor}` : `${t.manage}: ${phone}`}
+            onPress={() => (role === 'vendor' ? session.update({ vendorId: null }) : router.push('/buyer/card'))}
             style={styles.link}>
-            <Text style={[styles.linkText, { color: colors.ink }]}>{t.change}</Text>
+            <Text style={[styles.linkText, { color: colors.ink }]}>{role === 'vendor' ? t.change : t.manage}</Text>
           </Pressable>
         </View>
       </Section>
@@ -162,6 +174,39 @@ export function SettingsScreen({ role }: { role: AppRole }) {
         <ThemedText type="caption">{t.buildNote}</ThemedText>
       </View>
     </Screen>
+  );
+}
+
+type ChoicesProps<T extends string> = {
+  label: string;
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+  ink: string;
+};
+
+// One radio row per option (language, theme).
+function Choices<T extends string>({ label, options, value, onChange, ink }: ChoicesProps<T>) {
+  const theme = useTheme();
+  return (
+    <View accessibilityRole="radiogroup" accessibilityLabel={label} style={styles.options}>
+      {options.map((option) => {
+        const checked = option.value === value;
+        return (
+          <Pressable
+            key={option.value}
+            accessibilityRole="radio"
+            accessibilityState={{ checked }}
+            onPress={() => onChange(option.value)}
+            style={[styles.option, { backgroundColor: theme.card }]}>
+            <View style={[styles.radio, { borderColor: checked ? ink : theme.muted }]}>
+              {checked && <View style={[styles.radioDot, { backgroundColor: ink }]} />}
+            </View>
+            <ThemedText style={styles.optionText}>{option.label}</ThemedText>
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }
 

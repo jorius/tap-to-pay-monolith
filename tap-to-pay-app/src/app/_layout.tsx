@@ -1,12 +1,11 @@
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useColorScheme } from 'react-native';
 
 import { ConnectionDot } from '@/components/connection-label';
 import { HeaderTitle } from '@/components/header-title';
 import { HealthProvider } from '@/hooks/use-health';
 import { SessionProvider, useSession } from '@/hooks/use-session';
-import { useTheme } from '@/hooks/use-theme';
+import { useScheme, useTheme } from '@/hooks/use-theme';
 import { useCopy } from '@/i18n';
 import { commonCopy } from '@/i18n/common';
 
@@ -21,7 +20,8 @@ export default function RootLayout() {
 }
 
 function Navigation() {
-  const base = useColorScheme() === 'dark' ? DarkTheme : DefaultTheme;
+  const scheme = useScheme();
+  const base = scheme === 'dark' ? DarkTheme : DefaultTheme;
   const theme = useTheme();
   const t = useCopy(commonCopy);
   const { debugLabels } = useSession();
@@ -49,7 +49,7 @@ function Navigation() {
           options={{ headerTitle: () => <HeaderTitle title={t.titles.debug} />, headerRight: undefined }}
         />
       </Stack>
-      <StatusBar style="auto" />
+      <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
     </ThemeProvider>
   );
 }

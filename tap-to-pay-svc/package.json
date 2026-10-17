@@ -10,7 +10,9 @@
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "seed": "tsx scripts/seed.ts",
-    "grant:buyer": "tsx scripts/grant-buyer.ts"
+    "grant:buyer": "tsx scripts/grant-buyer.ts",
+    "add:buyer": "tsx scripts/add-buyer.ts",
+    "add:wallet": "tsx scripts/add-wallet.ts"
   },
   "dependencies": {
     "@interledger/open-payments": "7.4.0",

@@ -1,5 +1,6 @@
-// Inlined by Metro at bundle time (SDD section 12); without it the phone would call itself.
-export const apiUrl = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4000';
+// Inlined by Metro at bundle time (SDD section 12); without it the phone would call itself. A copied port-forward URL
+// often ends in "/", which would double the slash every path starts with.
+export const apiUrl = (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4000').replace(/\/+$/, '');
 
 const TIMEOUT_MS = 5000;
 
@@ -28,7 +29,12 @@ export async function api<T>(path: string, init: Init = {}): Promise<T> {
     try {
       res = await fetch(`${apiUrl}${path}`, {
         method: init.method ?? 'GET',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          // Port-forward hosts (VS Code dev tunnels, ngrok) can answer with a browser warning page instead of the API.
+          'X-Tunnel-Skip-AntiPhishing-Page': 'true',
+          'ngrok-skip-browser-warning': '1',
+        },
         body: init.body === undefined ? undefined : JSON.stringify(init.body),
         signal: controller.signal,
       });

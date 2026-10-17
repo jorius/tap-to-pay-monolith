@@ -2,6 +2,8 @@ import type { Amount } from '../services/money.js';
 
 export type WalletInfo = {
   id: string;
+  /** The name the wallet's owner publishes; null when the document has none. */
+  publicName: string | null;
   authServer: string;
   resourceServer: string;
   assetCode: string;

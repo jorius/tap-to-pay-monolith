@@ -1,5 +1,5 @@
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 import { api, ApiError } from '@/api/client';
 
@@ -10,11 +10,24 @@ type State<T> = { data?: T; error?: ApiError; loading: boolean };
 export function useApi<T>(path: string | null, { pollMs }: { pollMs?: number } = {}) {
   const [state, setState] = useState<State<T>>({ loading: path !== null });
   const [tick, setTick] = useState(0);
-  const reload = useCallback(() => setTick((n) => n + 1), []);
+  // reload() settles once the read it triggered lands, so a pull-to-refresh spinner stays up until then.
+  const waiting = useRef<(() => void)[]>([]);
+  const reload = useCallback(
+    () =>
+      new Promise<void>((resolve) => {
+        waiting.current.push(resolve);
+        setTick((n) => n + 1);
+      }),
+    [],
+  );
 
   useFocusEffect(
     useCallback(() => {
-      if (!path) return;
+      const settle = () => waiting.current.splice(0).forEach((resolve) => resolve());
+      if (!path) {
+        settle();
+        return;
+      }
       let alive = true;
       let timer: ReturnType<typeof setTimeout> | undefined;
       const run = async () => {
@@ -25,6 +38,7 @@ export function useApi<T>(path: string | null, { pollMs }: { pollMs?: number } =
           const error = e instanceof ApiError ? e : new ApiError('UNKNOWN', String(e), 0);
           if (alive) setState((s) => ({ data: s.data, error, loading: false }));
         }
+        if (alive) settle();
         if (alive && pollMs) timer = setTimeout(run, pollMs);
       };
       run();
@@ -37,5 +51,8 @@ export function useApi<T>(path: string | null, { pollMs }: { pollMs?: number } =
     }, [path, pollMs, tick]),
   );
 
-  return { ...state, reload };
+  // A write that answers with the fresh resource (e.g. a BuyerView) replaces the cached one without a re-read.
+  const set = useCallback((data: T) => setState({ data, loading: false }), []);
+
+  return { ...state, reload, set };
 }

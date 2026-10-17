@@ -11,6 +11,7 @@ import { SaleRow } from '@/components/vendor/sale-row';
 import { SaleSheet } from '@/components/vendor/sale-sheet';
 import { ErrorState, LoadingState } from '@/components/vendor/states';
 import { VendorGate } from '@/components/vendor/vendor-gate';
+import { defaultFirst, vendorWallets, walletLabel } from '@/components/vendor/wallets';
 import { useApi } from '@/hooks/use-api';
 import { useTheme } from '@/hooks/use-theme';
 import { defineCopy, useCopy, useLang } from '@/i18n';
@@ -19,6 +20,8 @@ type Filter = 'ALL' | Exclude<SaleStatus, 'AWAITING_TAP'>;
 
 const copy = defineCopy(
   {
+    walletFilter: 'Filtrar por billetera',
+    allWallets: 'Todas',
     statusFilter: 'Filtrar por estado',
     filters: { ALL: 'Todos', PAID: 'Pagados', CHARGING: 'Pendientes', FAILED: 'Fallidos' },
     today: 'Hoy',
@@ -29,6 +32,8 @@ const copy = defineCopy(
     empty: 'No hay movimientos con este filtro.',
   },
   {
+    walletFilter: 'Filter by wallet',
+    allWallets: 'All',
     statusFilter: 'Filter by status',
     filters: { ALL: 'All', PAID: 'Paid', CHARGING: 'Pending', FAILED: 'Failed' },
     today: 'Today',
@@ -43,21 +48,38 @@ const copy = defineCopy(
 const FILTERS: Filter[] = ['ALL', 'PAID', 'CHARGING', 'FAILED'];
 
 export default function TransactionsScreen() {
-  return <VendorGate>{(vendor) => <Transactions vendor={vendor} />}</VendorGate>;
+  return <VendorGate>{(vendor, _replace, reload) => <Transactions vendor={vendor} reload={reload} />}</VendorGate>;
 }
 
-// The vendor's sales by status and day (design: Movimientos); a row opens its detail sheet.
-function Transactions({ vendor }: { vendor: VendorView }) {
+// The vendor's sales by wallet, status and day (design: Movimientos); a row opens its detail sheet.
+function Transactions({ vendor, reload }: { vendor: VendorView; reload: () => Promise<void> }) {
   const t = useCopy(copy);
   const lang = useLang();
+  const wallets = defaultFirst(vendorWallets(vendor));
+  const [picked, setPicked] = useState('ALL');
+  // A wallet removed in the Billetera tab falls back to all of them.
+  const walletId = wallets.some((w) => w.id === picked) ? picked : 'ALL';
   const [filter, setFilter] = useState<Filter>('ALL');
   const [daysBack, setDaysBack] = useState(0);
+  const [refreshes, setRefreshes] = useState(0);
   const day = localDay(daysBack);
-  const query = `date=${day.iso}&limit=50${filter === 'ALL' ? '' : `&status=${filter}`}`;
+  const query = `date=${day.iso}&limit=50${filter === 'ALL' ? '' : `&status=${filter}`}${walletId === 'ALL' ? '' : `&walletId=${walletId}`}`;
   const label = daysBack === 0 ? t.today : daysBack === 1 ? t.yesterday : day.date.toLocaleDateString(locale(lang), { day: 'numeric', month: 'short' });
 
   return (
-    <Screen>
+    <Screen
+      onRefresh={() => {
+        setRefreshes((n) => n + 1);
+        return reload();
+      }}>
+      {wallets.length > 1 && (
+        <FilterChips
+          label={t.walletFilter}
+          options={[{ value: 'ALL', label: t.allWallets }, ...wallets.map((w) => ({ value: w.id, label: walletLabel(w) }))]}
+          value={walletId}
+          onChange={setPicked}
+        />
+      )}
       <FilterChips
         label={t.statusFilter}
         options={FILTERS.map((value) => ({ value, label: t.filters[value] }))}
@@ -72,8 +94,8 @@ function Transactions({ vendor }: { vendor: VendorView }) {
         canGoForward={daysBack > 0}
         onStep={(step) => setDaysBack((n) => Math.max(0, n - step))}
       />
-      {/* Keyed by query so a filter change shows a spinner instead of the previous filter's rows. */}
-      <SalesList key={query} vendorId={vendor.id} query={query} empty={t.empty} />
+      {/* Keyed by query and pull-to-refresh so each shows a spinner and re-reads instead of the previous rows. */}
+      <SalesList key={`${query}:${refreshes}`} vendorId={vendor.id} query={query} empty={t.empty} />
     </Screen>
   );
 }

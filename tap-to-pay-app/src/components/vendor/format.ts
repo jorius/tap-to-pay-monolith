@@ -34,10 +34,10 @@ export function fill(template: string, values: Record<string, string>) {
   return template.replace(/\{(\w+)\}/g, (_, key: string) => values[key] ?? '');
 }
 
-// The service words refusals in English (SDD §9): the copy reuses the amount or the currency codes inside them, and
-// falls back to the service's message whenever the code is unknown or the message does not carry what it needs.
+// The service words refusals in English (SDD §9): the copy reuses the amount inside them, and falls back to the
+// service's message whenever the code is unknown or the message does not carry an amount.
 export function failureText(
-  sale: Pick<SaleView, 'failureCode' | 'failureMessage' | 'assetCode'>,
+  sale: Pick<SaleView, 'failureCode' | 'failureMessage' | 'assetCode' | 'debitAssetCode'>,
   templates: Record<string, string>,
   lang: Lang,
 ) {
@@ -45,13 +45,11 @@ export function failureText(
   const template = sale.failureCode ? templates[sale.failureCode] : undefined;
   if (!template) return message;
   const number = message.match(/\d+(?:\.\d+)?/)?.[0];
-  const codes = message.match(/[A-Z]{3}/g) ?? [];
   if (template.includes('{amount}') && !number) return message;
-  if (template.includes('{buyer}') && codes.length < 2) return message;
-  const amount = number
-    ? formatMoney(number.replace('.', ''), number.split('.')[1]?.length ?? 0, sale.assetCode, lang)
-    : '';
-  return fill(template, { amount, buyer: codes[0] ?? '', vendor: codes[1] ?? '', message });
+  // Caps live in the buyer's asset, which the service names after the amount ("max 20.00 USD").
+  const code = message.match(/\b[A-Z]{3}\b/)?.[0] ?? sale.debitAssetCode ?? sale.assetCode;
+  const amount = number ? formatMoney(number.replace('.', ''), number.split('.')[1]?.length ?? 0, code, lang) : '';
+  return fill(template, { amount, message });
 }
 
 export function errorText(error: ApiError, networkTemplate: string) {
@@ -62,6 +60,11 @@ export function errorText(error: ApiError, networkTemplate: string) {
 export function walletSite(walletAddress: string) {
   const host = walletAddress.match(/^https?:\/\/([^/]+)/)?.[1] ?? '';
   return host === 'ilp.interledger-test.dev' ? 'https://wallet.interledger-test.dev' : `https://${host}`;
+}
+
+// The path of a wallet address, enough to tell a vendor's wallets apart: "https://ilp.example/tourism" → "/tourism".
+export function addressPath(walletAddress: string) {
+  return walletAddress.replace(/^https?:\/\/[^/]+/, '') || walletAddress;
 }
 
 export function providerName(walletAddress: string) {

@@ -1,6 +1,6 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useState, type ReactNode } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { formatMoney } from '@/api/money';
 import type { VendorView } from '@/api/types';
@@ -24,6 +24,8 @@ import { NfcTap } from '@/nfc/nfc-tap';
 const copy = defineCopy(
   {
     amount: 'Monto',
+    clear: 'Limpiar',
+    quick: 'Cobros rápidos',
     cents: 'Escribe en centavos: 1 2 0 0 → {example}',
     charge: 'Cobrar',
     del: 'Borrar',
@@ -37,7 +39,7 @@ const copy = defineCopy(
     walletRead: 'Billetera leída',
     charging: 'cobrando…',
     paid: '✓ Pagado',
-    paidAt: 'Pagado a las {time}',
+    paidAt: 'a las {time}',
     newSale: 'Nueva venta',
     notPaid: '✕ No pagado',
     unconfirmed: '? Sin confirmar',
@@ -48,6 +50,8 @@ const copy = defineCopy(
   },
   {
     amount: 'Amount',
+    clear: 'Clear',
+    quick: 'Quick amounts',
     cents: 'Type in cents: 1 2 0 0 → {example}',
     charge: 'Charge',
     del: 'Delete',
@@ -61,7 +65,7 @@ const copy = defineCopy(
     walletRead: 'Wallet read',
     charging: 'charging…',
     paid: '✓ Paid',
-    paidAt: 'Paid at {time}',
+    paidAt: 'at {time}',
     newSale: 'New sale',
     notPaid: '✕ Not paid',
     unconfirmed: '? Not confirmed',
@@ -72,12 +76,15 @@ const copy = defineCopy(
   },
 );
 
+// Quick amounts in whole units of the receiving wallet's currency.
+const PRESETS = [5, 10, 15, 20, 50, 100];
+
 export default function SaleScreen() {
-  return <VendorGate>{(vendor) => <Terminal vendor={vendor} />}</VendorGate>;
+  return <VendorGate>{(vendor, _replace, reload) => <Terminal vendor={vendor} reload={reload} />}</VendorGate>;
 }
 
 // The terminal (design: Terminal, SDD §6): amount in the smallest unit, then the sale state machine of useSale.
-function Terminal({ vendor }: { vendor: VendorView }) {
+function Terminal({ vendor, reload }: { vendor: VendorView; reload: () => Promise<void> }) {
   const theme = useTheme();
   const lang = useLang();
   const t = useCopy(copy);
@@ -86,26 +93,58 @@ function Terminal({ vendor }: { vendor: VendorView }) {
   const colors = roleColors(theme, 'vendor');
   const sale = useSale(vendor.id, { simulate: debugLabels });
   const [digits, setDigits] = useState('1200');
+  // The keypad prices in the receiving wallet (the top-level fields); a created sale keeps its own wallet and asset even
+  // if the receiving wallet changes before the tap.
   const money = (amount: string) => formatMoney(amount, vendor.assetScale, vendor.assetCode, lang);
+  const saleAmount = sale.sale ? formatMoney(sale.sale.amount, sale.sale.assetScale, sale.sale.assetCode, lang) : money(digits);
   const [number] = money(digits).split(' ');
   const refused = sale.sale?.status === 'FAILED';
 
   return (
-    <Screen>
-      <ThemedText type="caption">
-        {vendor.name} · {vendor.assetCode}
-      </ThemedText>
+    <Screen onRefresh={reload}>
+      <ThemedText type="caption">{vendor.name}</ThemedText>
 
       {sale.state === 'idle' ? (
         <>
           <ThemedView card>
-            <ThemedText type="caption">{t.amount}</ThemedText>
+            <View style={styles.amountHead}>
+              <ThemedText type="caption">{t.amount}</ThemedText>
+              <Pressable
+                accessibilityRole="button"
+                disabled={digits === '0'}
+                hitSlop={12}
+                onPress={() => setDigits('0')}
+                style={({ pressed }) => ({ opacity: digits === '0' ? 0.4 : pressed ? 0.6 : 1 })}>
+                <Text style={[styles.clear, { color: colors.ink }]}>{t.clear}</Text>
+              </Pressable>
+            </View>
             <View accessible accessibilityLiveRegion="polite" style={styles.amountRow}>
               <Text style={[styles.amountBig, { color: theme.text }]}>{number}</Text>
               <Text style={[styles.code, { color: theme.muted }]}>{vendor.assetCode}</Text>
             </View>
             <ThemedText type="caption">{fill(t.cents, { example: money('1200').split(' ')[0] })}</ThemedText>
           </ThemedView>
+          <View accessibilityLabel={t.quick} style={styles.presets}>
+            {PRESETS.map((units) => {
+              // Whole units to the smallest unit as text, so no float ever touches the amount.
+              const preset = `${units}${'0'.repeat(vendor.assetScale)}`;
+              return (
+                <Pressable
+                  key={units}
+                  accessibilityRole="button"
+                  accessibilityLabel={money(preset)}
+                  onPress={() => setDigits(preset)}
+                  style={({ pressed }) => [
+                    styles.preset,
+                    { backgroundColor: theme.card, borderColor: digits === preset ? colors.ink : theme.card, opacity: pressed ? 0.6 : 1 },
+                  ]}>
+                  <Text style={[styles.presetText, { color: theme.text }]}>
+                    {units} {vendor.assetCode}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
           <Keypad digits={digits} onChange={setDigits} deleteLabel={t.del} />
           <BigButton
             label={t.charge}
@@ -117,7 +156,7 @@ function Terminal({ vendor }: { vendor: VendorView }) {
       ) : (
         <View style={styles.center}>
           <ThemedText type="caption">{t.saleOf}</ThemedText>
-          <Text style={[styles.amountSale, { color: theme.text }]}>{money(sale.sale?.amount ?? digits)}</Text>
+          <Text style={[styles.amountSale, { color: theme.text }]}>{saleAmount}</Text>
         </View>
       )}
 
@@ -170,7 +209,6 @@ function Terminal({ vendor }: { vendor: VendorView }) {
           icon="check-circle-outline"
           color={theme.okInk}
           title={t.paid}
-          pill={<StatusPill tone="ok" label={v.status.PAID} />}
           detail={sale.sale?.paidAt ? fill(t.paidAt, { time: time(sale.sale.paidAt, lang) }) : undefined}
           action={<BigButton label={t.newSale} color={Fill.vendor} onPress={sale.reset} />}
         />
@@ -215,7 +253,8 @@ type OutcomeProps = {
   title: string;
   message?: string;
   detail?: string;
-  pill: ReactNode;
+  // Left out where it would repeat the title (a paid sale).
+  pill?: ReactNode;
   action: ReactNode;
 };
 
@@ -230,7 +269,7 @@ function Outcome({ icon, color, title, message, detail, pill, action }: OutcomeP
         {title}
       </Text>
       {message ? <Text style={[styles.lead, { color: theme.text }]}>{message}</Text> : null}
-      <View style={styles.center}>{pill}</View>
+      {pill ? <View style={styles.center}>{pill}</View> : null}
       {detail ? (
         <ThemedText type="caption" style={styles.centerText}>
           {detail}
@@ -242,6 +281,11 @@ function Outcome({ icon, color, title, message, detail, pill, action }: OutcomeP
 }
 
 const styles = StyleSheet.create({
+  amountHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  clear: { fontSize: 15, fontWeight: '700' },
+  presets: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  preset: { flexGrow: 1, minWidth: '30%', minHeight: 48, borderRadius: 14, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  presetText: { fontSize: 16, fontWeight: '700' },
   amountRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
   amountBig: { fontSize: 52, lineHeight: 60, fontWeight: '800', fontVariant: ['tabular-nums'] },
   code: { fontSize: 20, fontWeight: '700' },
