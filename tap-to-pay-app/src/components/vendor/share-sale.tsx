@@ -1,7 +1,7 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Image } from 'expo-image';
 import { useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { apiUrl } from '@/api/client';
 import { StatusPill } from '@/components/status-pill';
@@ -24,6 +24,11 @@ const copy = defineCopy(
     scan: 'El cliente lo escanea desde la app: Tarjeta → Pagar con QR o link',
     expires: 'El link vence a las {time}',
     noWhatsapp: 'No se pudo abrir WhatsApp: usa Compartir.',
+    phone: 'Enviar al WhatsApp del cliente',
+    phonePlaceholder: 'Celular, ej. 300 123 4567',
+    phoneHint: 'Un celular colombiano de 10 dígitos lleva el +57 solo; otro país, escríbelo con su código.',
+    send: 'Enviar',
+    badPhone: 'Escribe un número válido: 10 dígitos, o con el código del país.',
   },
   {
     or: 'Or charge it without NFC',
@@ -34,6 +39,11 @@ const copy = defineCopy(
     scan: 'The customer scans it in the app: Card → Pay with a QR or link',
     expires: 'The link expires at {time}',
     noWhatsapp: "Couldn't open WhatsApp: use Share.",
+    phone: "Send to the customer's WhatsApp",
+    phonePlaceholder: 'Mobile, e.g. 300 123 4567',
+    phoneHint: 'A 10-digit Colombian mobile gets +57 added; for another country type its code.',
+    send: 'Send',
+    badPhone: 'Type a valid number: 10 digits, or with the country code.',
   },
 );
 
@@ -65,6 +75,21 @@ export function ShareSale({ saleId }: { saleId: string }) {
     }
   };
 
+  const [phone, setPhone] = useState('');
+  const sendTo = async () => {
+    const digits = whatsappNumber(phone);
+    if (!digits) return setNotice(t.badPhone);
+    const created = await ensure();
+    if (!created) return;
+    setNotice(null);
+    try {
+      // Straight into that chat, with the message written: the vendor only taps send.
+      await Linking.openURL(`https://wa.me/${digits}?text=${encodeURIComponent(created.message)}`);
+    } catch {
+      setNotice(t.noWhatsapp);
+    }
+  };
+
   const share = async () => {
     const created = await ensure();
     if (created) await Share.share({ message: created.message }).catch(() => {});
@@ -78,6 +103,35 @@ export function ShareSale({ saleId }: { saleId: string }) {
         <Action icon="whatsapp" label={t.whatsapp} color={colors.ink} onPress={whatsapp} />
         <Action icon="share-variant" label={t.share} color={colors.ink} onPress={share} />
       </View>
+      <ThemedText type="caption">{t.phone}</ThemedText>
+      <View style={styles.row}>
+        <TextInput
+          value={phone}
+          onChangeText={(value) => {
+            setPhone(value);
+            setNotice(null);
+          }}
+          placeholder={t.phonePlaceholder}
+          placeholderTextColor={theme.muted}
+          keyboardType="phone-pad"
+          textContentType="telephoneNumber"
+          autoComplete="tel"
+          style={[styles.input, { color: theme.text, borderColor: theme.border, backgroundColor: theme.background }]}
+        />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t.send}
+          disabled={!phone.trim()}
+          onPress={sendTo}
+          style={({ pressed }) => [
+            styles.send,
+            { backgroundColor: colors.fill, opacity: !phone.trim() ? 0.4 : pressed ? 0.8 : 1 },
+          ]}>
+          <MaterialCommunityIcons name="whatsapp" size={22} color="#FFFFFF" />
+          <Text style={styles.sendLabel}>{t.send}</Text>
+        </Pressable>
+      </View>
+      <ThemedText type="caption">{t.phoneHint}</ThemedText>
       {loading && <ActivityIndicator color={colors.brand} />}
       {error && <StatusPill tone="bad" label={errorText(error, v.network)} />}
       {notice && <ThemedText type="caption">{notice}</ThemedText>}
@@ -102,6 +156,17 @@ export function ShareSale({ saleId }: { saleId: string }) {
       )}
     </ThemedView>
   );
+}
+
+/**
+ * The number wa.me expects: digits only, with the country code. A 10-digit number starting with 3 is a Colombian mobile
+ * and gets 57; anything else must already carry its code (8 to 15 digits, as in E.164).
+ */
+export function whatsappNumber(input: string): string | null {
+  const digits = input.replace(/[\s()+.-]/g, '');
+  if (!/^\d+$/.test(digits)) return null;
+  if (/^3\d{9}$/.test(digits)) return `57${digits}`;
+  return /^\d{8,15}$/.test(digits) ? digits : null;
 }
 
 type ActionProps = {
@@ -141,4 +206,7 @@ const styles = StyleSheet.create({
   qrBox: { alignItems: 'center', gap: 8, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16 },
   qr: { width: 240, height: 240 },
   center: { textAlign: 'center' },
+  input: { flex: 1, minHeight: 52, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, fontSize: 17 },
+  send: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 12, paddingHorizontal: 16, minHeight: 52 },
+  sendLabel: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
 });
