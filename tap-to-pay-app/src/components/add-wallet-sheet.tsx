@@ -13,8 +13,9 @@ const copy = defineCopy(
   {
     title: 'Agregar billetera',
     hint: 'Búscala en la app de tu billetera, en «Recibir» o «Mi dirección».',
-    info: 'Empieza por $ o por https://, por ejemplo $ilp.interledger-test.dev/ana',
+    info: 'Escribe solo lo que va después de $ilp.interledger-test.dev/. Si es de otro proveedor, pega la dirección completa.',
     label: 'Dirección de la billetera',
+    placeholder: '9c0ecd3b o tu alias',
     looking: 'Buscando…',
     found: (name: string, currency: string) => `✓ Encontrada: ${name} · ${currency}`,
     missing: 'No encontramos esa billetera',
@@ -25,8 +26,9 @@ const copy = defineCopy(
   {
     title: 'Add a wallet',
     hint: 'Find it in your wallet app, under "Receive" or "My address".',
-    info: 'It starts with $ or https://, for example $ilp.interledger-test.dev/ana',
+    info: 'Type only what comes after $ilp.interledger-test.dev/. From another provider? Paste the full address.',
     label: 'Wallet address',
+    placeholder: '9c0ecd3b or your alias',
     looking: 'Looking it up…',
     found: (name: string, currency: string) => `✓ Found: ${name} · ${currency}`,
     missing: "We couldn't find that wallet",
@@ -47,6 +49,18 @@ type Props<T> = {
 // Tagged with the address it answers, so typing on leaves the old answer behind without a reset.
 type Lookup = { url: string } & ({ state: 'looking' | 'missing' } | { state: 'found'; name: string; assetCode: string });
 
+// Test Wallet addresses all live on this host, so the user types only their own part (9c0ecd3b, an alias).
+const TEST_WALLET = 'ilp.interledger-test.dev/';
+
+// A pasted full address ($host/path or http(s)://…) is used as-is, the payment pointer as https; anything else is the
+// part after the Test Wallet host.
+function walletUrl(typed: string) {
+  const text = typed.trim();
+  if (/^(\$|https?:\/\/)/i.test(text)) return text.replace(/^\$/, 'https://');
+  const path = text.replace(/^\/+/, '').replace(/^ilp\.interledger-test\.dev\//i, '');
+  return path ? `https://${TEST_WALLET}${path}` : '';
+}
+
 // The "Agregar billetera" sheet of both builds: the phone reads the public wallet address document while the user
 // types, and "Agregar" only unlocks once it was found; the service then validates the address and resolves its asset.
 // role stays in Props for its callers; the copy is the same for both.
@@ -58,9 +72,9 @@ export function AddWalletSheet<T>({ visible, onClose, onAdd, onAdded }: Props<T>
   const [lookup, setLookup] = useState<Lookup | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  // A payment pointer ($ilp.example/ana) is the same address as https://ilp.example/ana.
   // shortcut: a bare $host pointer (spec: https://host/.well-known/pay) is not resolved; add it when a wallet uses one.
-  const url = address.trim().replace(/^\$/, 'https://');
+  const url = walletUrl(address);
+  const pasted = /^(\$|https?:\/\/)/i.test(address.trim());
   const isUrl = /^https?:\/\/[^\s/]+\.[^\s/]+\/\S*$/i.test(url);
   const current = isUrl && lookup?.url === url ? lookup : null;
 
@@ -133,22 +147,25 @@ export function AddWalletSheet<T>({ visible, onClose, onAdd, onAdded }: Props<T>
             <Text style={[styles.infoText, { color: theme.text }]}>{t.info}</Text>
           </View>
           <Text style={[styles.label, { color: theme.text }]}>{t.label}</Text>
-          <TextInput
-            accessibilityLabel={t.label}
-            value={address}
-            onChangeText={(text) => {
-              setAddress(text);
-              setError(null);
-            }}
-            keyboardType="url"
-            autoCapitalize="none"
-            autoCorrect={false}
-            autoFocus
-            placeholder="$ilp.interledger-test.dev/…"
-            placeholderTextColor={theme.muted}
-            onSubmitEditing={submit}
-            style={[styles.input, { color: theme.text, borderColor: status?.color ?? theme.border }]}
-          />
+          <View style={[styles.inputRow, { borderColor: status?.color ?? theme.border }]}>
+            {!pasted && <Text style={[styles.prefix, { color: theme.muted }]}>${TEST_WALLET}</Text>}
+            <TextInput
+              accessibilityLabel={t.label}
+              value={address}
+              onChangeText={(text) => {
+                setAddress(text);
+                setError(null);
+              }}
+              keyboardType="url"
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoFocus
+              placeholder={t.placeholder}
+              placeholderTextColor={theme.muted}
+              onSubmitEditing={submit}
+              style={[styles.input, { color: theme.text }]}
+            />
+          </View>
           <View accessibilityLiveRegion="polite" style={styles.status}>
             {status && <Text style={[styles.statusText, { color: status.color }]}>{status.text}</Text>}
           </View>
@@ -172,7 +189,9 @@ const styles = StyleSheet.create({
   info: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 12 },
   infoText: { flex: 1, fontSize: 13, lineHeight: 18 },
   label: { fontSize: 14, fontWeight: '600' },
-  input: { minHeight: 52, borderWidth: 2, borderRadius: 12, paddingHorizontal: 14, fontSize: 15, fontFamily: 'monospace' },
+  inputRow: { minHeight: 52, flexDirection: 'row', alignItems: 'center', borderWidth: 2, borderRadius: 12, paddingHorizontal: 14 },
+  prefix: { fontSize: 13, fontFamily: 'monospace' },
+  input: { flex: 1, minHeight: 48, fontSize: 15, fontFamily: 'monospace', paddingVertical: 0 },
   status: { minHeight: 20 },
   statusText: { fontSize: 15, fontWeight: '600' },
   cancel: { minHeight: 48, alignItems: 'center', justifyContent: 'center' },

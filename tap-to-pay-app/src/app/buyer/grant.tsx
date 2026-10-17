@@ -22,6 +22,8 @@ const copy = defineCopy(
   {
     intro: 'Dale permiso a Paynela una sola vez para pagar con esta billetera, hasta el monto diario que elijas. Lo confirmas en la página de tu billetera.',
     daily: 'Monto diario permitido',
+    owner: (address: string) =>
+      `En la página de la billetera entra con la cuenta dueña de ${address}. Con otra cuenta la billetera rechaza el permiso («Access to the given resource is forbidden»).`,
     current: (amount: string) => `Hoy tiene permiso hasta ${amount} por día; darlo de nuevo reemplaza ese monto.`,
     authorize: 'Dar permiso en mi billetera',
     waiting: 'Confirma en tu billetera…',
@@ -44,6 +46,8 @@ const copy = defineCopy(
   {
     intro: 'Give Paynela permission once to pay with this wallet, up to the daily amount you choose. You confirm it on your wallet page.',
     daily: 'Allowed daily amount',
+    owner: (address: string) =>
+      `On the wallet page, sign in with the account that owns ${address}. With another account the wallet refuses the permission ("Access to the given resource is forbidden").`,
     current: (amount: string) => `It has permission up to ${amount} per day; giving it again replaces that amount.`,
     authorize: 'Give permission in my wallet',
     waiting: 'Confirm in your wallet…',
@@ -189,6 +193,8 @@ function GrantForm({ buyerId, wallet, onChanged }: FormProps) {
         </Text>
         <StatusPill tone={wallet.hasGrant ? 'ok' : 'neutral'} label={wallet.hasGrant ? t.granted : t.notGranted} />
       </View>
+      {/* The Test Wallet only shows the consent to the account that owns this address; any other gets a 403 page. */}
+      {!wallet.hasGrant && <ThemedText type="caption">{t.owner(wallet.walletAddress.replace(/^https?:\/\//, '$'))}</ThemedText>}
       {wallet.grantDailyLimit ? <ThemedText type="caption">{t.current(money(wallet.grantDailyLimit))}</ThemedText> : null}
       <View style={styles.field}>
         <ThemedText style={styles.fieldLabel}>{t.daily}</ThemedText>
