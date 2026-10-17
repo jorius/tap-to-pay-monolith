@@ -83,7 +83,8 @@
 
     En cada hoja: código de verificación y aviso de que no es un
     certificado bancario.
-  ▸ App: tarjeta "Resumen del mes en PDF" en Movimientos (vendedor).
+  ▸ App: tarjeta "Resumen del mes en PDF" en el Panel del vendedor (primero
+    estaba en Movimientos; se movió a pedido).
 
   Pagos recurrentes del comercio
   ▸ Pestaña "Pagos" en el menú del vendedor.

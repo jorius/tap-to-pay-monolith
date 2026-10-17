@@ -515,7 +515,7 @@ The vendor terminal creates sales on a phone without NFC, or with NFC off, too: 
   Averages run from the first month with income, so a new business is not averaged with months before it existed.
 - **Page 2, the month's sales:** revenue, approved sales, average and median ticket, customers, approval rate and refusals, change against the previous month, best day, busiest hour, channels, revenue per day and a 6-month trend.
 
-Every page ends with a 12-character verification code (a SHA-256 of the figures) and a note that balances live in the wallet and that the document is not a bank certificate. The vendor app opens it from *Movimientos*, for this month or the two before.
+Every page ends with a 12-character verification code (a SHA-256 of the figures) and a note that balances live in the wallet and that the document is not a bank certificate. The vendor app opens it from the *Panel* tab, for this month or the two before.
 
 **Resolving a stuck `CHARGING` sale**: read `outgoingPaymentUrl` and `incomingPaymentUrl` from the row, check both in the Test Wallet, then `UPDATE "Sale" SET status = 'PAID', "paidAt" = now() WHERE id = $1` or `SET status = 'FAILED', "failureCode" = 'MANUAL', "failureMessage" = '…'`.
 

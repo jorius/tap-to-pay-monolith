@@ -9,7 +9,6 @@ import { FilterChips } from '@/components/vendor/chips';
 import { fill, locale } from '@/components/vendor/format';
 import { SaleRow } from '@/components/vendor/sale-row';
 import { SaleSheet } from '@/components/vendor/sale-sheet';
-import { StatementCard } from '@/components/vendor/statement-card';
 import { ErrorState, LoadingState } from '@/components/vendor/states';
 import { VendorGate } from '@/components/vendor/vendor-gate';
 import { defaultFirst, vendorWallets, walletLabel } from '@/components/vendor/wallets';
@@ -73,7 +72,6 @@ function Transactions({ vendor, reload }: { vendor: VendorView; reload: () => Pr
         setRefreshes((n) => n + 1);
         return reload();
       }}>
-      <StatementCard vendorId={vendor.id} />
       {wallets.length > 1 && (
         <FilterChips
           label={t.walletFilter}

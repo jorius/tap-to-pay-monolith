@@ -12,6 +12,7 @@ import { BarChart, type Bar } from '@/components/vendor/bar-chart';
 import { FilterChips } from '@/components/vendor/chips';
 import { fill, locale, walletSite } from '@/components/vendor/format';
 import { SaleRow } from '@/components/vendor/sale-row';
+import { StatementCard } from '@/components/vendor/statement-card';
 import { ErrorState, LoadingState } from '@/components/vendor/states';
 import { VendorGate } from '@/components/vendor/vendor-gate';
 import { defaultFirst, vendorWallets, walletLabel } from '@/components/vendor/wallets';
@@ -113,6 +114,9 @@ function Dashboard({ vendor, reload }: { vendor: VendorView; reload: () => Promi
       />
       {/* Keyed by range, wallet and pull-to-refresh so each shows a spinner and re-reads instead of the previous figures. */}
       <Summary key={`${range}:${wallet.id}:${refreshes}`} vendorId={vendor.id} wallet={wallet} range={range} />
+
+      {/* The monthly financial statement for a lender: payment capacity and the month's sales, as a PDF. */}
+      <StatementCard vendorId={vendor.id} />
 
       <View style={styles.section}>
         <Text accessibilityRole="header" style={[styles.h2, { color: theme.text }]}>
