@@ -159,8 +159,8 @@ export interface Repo {
   setVendorPayer(vendorId: string, buyerId: string): Promise<void>;
   /** A vendor's recurring payments, oldest first. */
   listRecurring(vendorId: string): Promise<RecurringRow[]>;
-  /** Every sale a buyer paid or tried to pay inside [from, to), oldest first, with the receiving vendor's name. */
-  listPayerSales(buyerId: string, range: { from: Date; to: Date }): Promise<SaleWithVendor[]>;
+  /** Every sale a buyer paid or tried to pay inside [from, to) (open ends when left out), oldest first, with the receiving vendor's name. */
+  listPayerSales(buyerId: string, range: { from?: Date; to?: Date }): Promise<SaleWithVendor[]>;
   getRecurring(id: string): Promise<RecurringRow | null>;
   createRecurring(input: NewRecurring): Promise<RecurringRow>;
   updateRecurring(id: string, patch: RecurringPatch): Promise<RecurringRow>;
@@ -260,7 +260,7 @@ export class PrismaRepo implements Repo {
     return this.db.recurringPayment.findMany({ where: { vendorId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
   }
 
-  async listPayerSales(buyerId: string, { from, to }: { from: Date; to: Date }) {
+  async listPayerSales(buyerId: string, { from, to }: { from?: Date; to?: Date }) {
     const rows = await this.db.sale.findMany({
       where: { buyerId, createdAt: { gte: from, lt: to } },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],

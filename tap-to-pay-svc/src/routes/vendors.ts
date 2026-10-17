@@ -28,6 +28,8 @@ const salesQuery = z.object({
   // Over 200 is capped rather than refused, so a client asking for "everything" still gets an answer.
   limit: z.coerce.number().int().positive().default(50).transform((n) => Math.min(n, 200)),
   walletId: walletId.optional(),
+  // in: sales received; out: recurring payments made; all (default): both, as Movimientos shows them.
+  direction: z.enum(['in', 'out', 'all']).default('all'),
 });
 
 export function vendorsRouter(deps: Deps): Router {

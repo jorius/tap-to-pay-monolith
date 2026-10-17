@@ -90,7 +90,7 @@ function Dashboard({ vendor, reload }: { vendor: VendorView; reload: () => Promi
   const [refreshes, setRefreshes] = useState(0);
   // Starts on the receiving wallet; a wallet removed in the Billetera tab falls back to it too.
   const wallet = wallets.find((w) => w.id === walletId) ?? wallets[0];
-  const latest = useApi<VendorSaleView[]>(`/vendors/${vendor.id}/sales?limit=3&walletId=${wallet.id}`);
+  const latest = useApi<VendorSaleView[]>(`/vendors/${vendor.id}/sales?limit=3&walletId=${wallet.id}&direction=in`);
 
   return (
     <Screen

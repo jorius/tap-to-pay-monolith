@@ -191,10 +191,16 @@ export type VendorSummary = {
 };
 
 /**
- * GET /vendors/:id/sales: newest first. buyerName is the paying wallet's publicName, else the buyer's registered name;
- * null only for BUYER_UNKNOWN refusals, which have no wallet to point at.
+ * GET /vendors/:id/sales: the vendor's movements, newest first. IN is a sale the vendor received: buyerName is the paying
+ * wallet's publicName, else the buyer's registered name, null only for BUYER_UNKNOWN refusals. OUT is a recurring
+ * payment the vendor made: payeeName is the service it paid, and debitAmount what left the vendor's wallet.
  */
-export type VendorSaleView = SaleView & { buyerName: string | null };
+export type VendorSaleView = SaleView & {
+  direction: 'IN' | 'OUT';
+  buyerName: string | null;
+  /** The service an OUT movement paid; null for IN. */
+  payeeName: string | null;
+};
 
 /** GET /billers: the catalog of services a buyer can pay every month. */
 export type BillerView = {

@@ -151,8 +151,10 @@ export type VendorSummary = {
   buckets: { start: string; count: number; total: string }[];
 };
 
-// GET /vendors/:id/sales?status=PAID|CHARGING|FAILED&date=YYYY-MM-DD&limit=50: newest first, AWAITING_TAP left out.
-export type VendorSaleView = SaleView & { buyerName: string | null };
+// GET /vendors/:id/sales?status=PAID|CHARGING|FAILED&date=YYYY-MM-DD&limit=50&direction=in|out|all: the vendor's
+// movements, newest first, AWAITING_TAP left out. IN is a sale received (buyerName); OUT is a recurring payment the vendor
+// made (payeeName, and debitAmount is what left its wallet).
+export type VendorSaleView = SaleView & { direction: 'IN' | 'OUT'; buyerName: string | null; payeeName: string | null };
 
 // GET /billers: services a buyer can pay every month. The app draws each as a badge in its brand colour.
 export type BillerView = {

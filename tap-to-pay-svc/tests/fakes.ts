@@ -179,9 +179,9 @@ export class FakeRepo implements Repo {
   async listRecurring(vendorId: string) {
     return [...this.recurring.values()].filter((r) => r.vendorId === vendorId).map((r) => ({ ...r }));
   }
-  async listPayerSales(buyerId: string, { from, to }: { from: Date; to: Date }): Promise<SaleWithVendor[]> {
+  async listPayerSales(buyerId: string, { from, to }: { from?: Date; to?: Date }): Promise<SaleWithVendor[]> {
     return [...this.sales.values()]
-      .filter((s) => s.buyerId === buyerId && s.createdAt >= from && s.createdAt < to)
+      .filter((s) => s.buyerId === buyerId && (!from || s.createdAt >= from) && (!to || s.createdAt < to))
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
       .map((s) => ({
         ...s,
