@@ -32,6 +32,14 @@
           "image": "./assets/images/paynela-logo.png",
           "imageWidth": 150
         }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Paynela usa la cámara para escanear el código QR de un cobro.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
       ]
     ],
     "experiments": {

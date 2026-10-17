@@ -16,9 +16,11 @@ const HISTORY_SIZE = 20;
 const GRANT_TTL_MS = 10 * 60_000;
 
 export async function listBuyerViews(deps: BuyerDeps): Promise<BuyerView[]> {
-  const buyers = await deps.repo.listBuyers();
+  const [buyers, vendors] = await Promise.all([deps.repo.listBuyers(), deps.repo.listVendors()]);
+  // A vendor's payer identity (its own wallets, for its recurring payments) is not a phone's buyer.
+  const payers = new Set(vendors.map((v) => v.payerBuyerId).filter((id): id is string => id !== null));
   // A buyer left without wallets has no view; skip it rather than fail the whole list (add:wallet repairs it).
-  return Promise.all(buyers.filter((b) => b.wallets.length > 0).map((b) => view(deps, b)));
+  return Promise.all(buyers.filter((b) => b.wallets.length > 0 && !payers.has(b.id)).map((b) => view(deps, b)));
 }
 
 export async function getBuyer(deps: BuyerDeps, id: string): Promise<BuyerView> {
@@ -265,13 +267,13 @@ function parseLimits(input: { perPaymentLimit: string; dailyLimit: string }): Li
   return { perPaymentLimit, dailyLimit };
 }
 
-function ownWallet(buyer: BuyerWithWallets, walletId: string): BuyerWalletRow {
+export function ownWallet(buyer: BuyerWithWallets, walletId: string): BuyerWalletRow {
   const wallet = buyer.wallets.find((w) => w.id === walletId);
   if (!wallet) throw new HttpError(404, 'WALLET_NOT_FOUND', `Wallet ${walletId} not found for buyer ${buyer.id}`);
   return wallet;
 }
 
-async function loadBuyer(deps: BuyerDeps, id: string): Promise<BuyerWithWallets> {
+export async function loadBuyer(deps: Pick<Deps, 'repo'>, id: string): Promise<BuyerWithWallets> {
   const buyer = await deps.repo.getBuyer(id);
   if (!buyer) throw new HttpError(404, 'BUYER_NOT_FOUND', `Buyer ${id} not found`);
   return buyer;

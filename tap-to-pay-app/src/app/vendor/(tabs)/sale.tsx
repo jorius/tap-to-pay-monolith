@@ -13,11 +13,12 @@ import { vendorCopy } from '@/components/vendor/copy';
 import { errorText, failureText, fill, locale, time } from '@/components/vendor/format';
 import { Keypad } from '@/components/vendor/keypad';
 import { Numbered, OutcomeHead, Pulse, SaleButton, Steps } from '@/components/vendor/sale-ui';
+import { ShareSale } from '@/components/vendor/share-sale';
 import { SimulateTap } from '@/components/vendor/simulate-tap';
 import { VendorGate } from '@/components/vendor/vendor-gate';
 import { Brand, Fills } from '@/constants/theme';
 import { useApi } from '@/hooks/use-api';
-import { useSale, type AppFailure } from '@/hooks/use-sale';
+import { useSale, type AppFailure, type ReaderState } from '@/hooks/use-sale';
 import { useSession } from '@/hooks/use-session';
 import { useTheme } from '@/hooks/use-theme';
 import { defineCopy, useCopy, useLang } from '@/i18n';
@@ -47,6 +48,7 @@ const copy = defineCopy(
     announce: 'Recibiste {amount}',
     announced: 'Se anunció en voz alta: «{text}»',
     inWallet: 'La plata ya está en tu billetera',
+    viaLink: 'Pago por link o QR',
     newSale: 'Nueva venta',
     receipt: 'Enviar comprobante',
     receiptText: 'Comprobante de pago · {vendor}\nMonto: {amount}\nDe: {buyer}\nHora: {time}\nVenta {code}\nPaynela',
@@ -78,6 +80,9 @@ const copy = defineCopy(
     noNfc: 'Este celular no tiene NFC',
     noNfcModule: 'Este build no trae todavía el módulo NFC (NfcTap). Activa las etiquetas de depuración en Ajustes para simular el toque.',
     nfcOff: 'Enciende el NFC en los ajustes del celular',
+    noNfcHere: 'Este teléfono no tiene NFC: cobra con el QR o por WhatsApp.',
+    nfcOffHere: 'El NFC está apagado: enciéndelo en Ajustes, o cobra con el QR o por WhatsApp.',
+    noModuleHere: 'Este build no trae el lector NFC: cobra con el QR o por WhatsApp.',
   },
   {
     today: "Today you've made {amount}",
@@ -103,6 +108,7 @@ const copy = defineCopy(
     announce: 'You received {amount}',
     announced: 'Announced out loud: “{text}”',
     inWallet: 'The money is already in your wallet',
+    viaLink: 'Paid with the link or QR',
     newSale: 'New sale',
     receipt: 'Send receipt',
     receiptText: 'Payment receipt · {vendor}\nAmount: {amount}\nFrom: {buyer}\nTime: {time}\nSale {code}\nPaynela',
@@ -134,6 +140,9 @@ const copy = defineCopy(
     noNfc: 'This phone has no NFC',
     noNfcModule: "This build doesn't include the NFC module (NfcTap) yet. Turn on debug labels in Settings to simulate the tap.",
     nfcOff: "Turn NFC on in the phone's settings",
+    noNfcHere: 'This phone has no NFC: charge with the QR or by WhatsApp.',
+    nfcOffHere: 'NFC is off: turn it on in Settings, or charge with the QR or by WhatsApp.',
+    noModuleHere: "This build doesn't include the NFC reader: charge with the QR or by WhatsApp.",
   },
 );
 
@@ -157,7 +166,7 @@ function Terminal({ vendor }: { vendor: VendorView }) {
   const v = useCopy(vendorCopy);
   const router = useRouter();
   const { debugLabels, sound, update } = useSession();
-  const sale = useSale(vendor.id, { simulate: debugLabels });
+  const sale = useSale(vendor.id);
   // Whole units typed on the keypad, priced in the receiving wallet; the sale is created in its smallest unit.
   const [units, setUnits] = useState('0');
   const [showTech, setShowTech] = useState(false);
@@ -288,9 +297,10 @@ function Terminal({ vendor }: { vendor: VendorView }) {
 
   if (sale.state === 'awaiting_tap' || sale.state === 'nfc_error') {
     const nfcError = sale.state === 'nfc_error';
+    const reading = sale.reader === 'on';
     return (
-      // The debug tap card lists buyers, so with it the screen scrolls instead of pinning the circle.
-      <Screen scroll={!debugLabels}>
+      // The QR and WhatsApp panel (and the debug tap card) need room, so this screen scrolls.
+      <Screen>
         <View style={styles.fill}>
           <View style={styles.topRow}>
             <Pressable
@@ -311,16 +321,23 @@ function Terminal({ vendor }: { vendor: VendorView }) {
             <ThemedText type="caption">{bigWords}</ThemedText>
           </View>
           <View style={styles.grow} />
-          <Pulse />
+          {reading ? (
+            <>
+              <Pulse />
+              <View style={styles.grow} />
+              <Text style={[styles.lead, { color: theme.text }]}>{nfcError ? t.nfcRetry : t.approach}</Text>
+              <View style={styles.statusRow} accessibilityLiveRegion="polite">
+                <View style={[styles.dot, { backgroundColor: nfcError ? theme.outflow : theme.accentInk }]} />
+                <ThemedText type="caption" style={{ color: nfcError ? theme.outflow : theme.muted }}>
+                  {nfcError ? sale.nfcError : t.waiting}
+                </ThemedText>
+              </View>
+            </>
+          ) : (
+            <Text style={[styles.lead, { color: theme.text }]}>{readerText(sale.reader, t)}</Text>
+          )}
           <View style={styles.grow} />
-          <Text style={[styles.lead, { color: theme.text }]}>{nfcError ? t.nfcRetry : t.approach}</Text>
-          <View style={styles.statusRow} accessibilityLiveRegion="polite">
-            <View style={[styles.dot, { backgroundColor: nfcError ? theme.outflow : theme.accentInk }]} />
-            <ThemedText type="caption" style={{ color: nfcError ? theme.outflow : theme.muted }}>
-              {nfcError ? sale.nfcError : t.waiting}
-            </ThemedText>
-          </View>
-          <View style={styles.grow} />
+          {s && <ShareSale saleId={s.id} amount={big} />}
           {debugLabels && <SimulateTap onTap={sale.tap} />}
           <Pressable accessibilityRole="button" onPress={sale.reset} style={styles.link}>
             <Text style={[styles.linkText, { color: theme.outflow }]}>{t.cancel}</Text>
@@ -349,7 +366,7 @@ function Terminal({ vendor }: { vendor: VendorView }) {
           <View style={styles.grow} />
           <Steps
             items={[
-              { state: 'done', label: t.stepRead, detail: s?.buyerName ?? undefined },
+              { state: 'done', label: sale.walletAddress ? t.stepRead : t.viaLink, detail: s?.buyerName ?? undefined },
               { state: 'current', label: t.stepCharge },
               { state: 'pending', label: t.stepMoney },
             ]}
@@ -474,6 +491,12 @@ function Terminal({ vendor }: { vendor: VendorView }) {
       <SaleButton ghost label={t.chargeAgain} disabled={sale.starting} onPress={() => sale.charge(amount)} />
     </Screen>
   );
+}
+
+function readerText(reader: ReaderState, t: (typeof copy)['es']) {
+  if (reader === 'no_nfc') return t.noNfcHere;
+  if (reader === 'nfc_off') return t.nfcOffHere;
+  return t.noModuleHere;
 }
 
 function appFailureText(failure: AppFailure | null, t: (typeof copy)['es'], networkTemplate: string) {

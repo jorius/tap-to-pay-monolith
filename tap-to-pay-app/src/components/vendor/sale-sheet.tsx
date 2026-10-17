@@ -1,7 +1,7 @@
 import { Modal, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 
-import { formatMoney } from '@/api/money';
-import type { VendorSaleView, VendorWalletView } from '@/api/types';
+import { buyerAmount, formatMoney } from '@/api/money';
+import type { ChargeChannel, VendorSaleView, VendorWalletView } from '@/api/types';
 import { BigButton } from '@/components/big-button';
 import { StatusPill } from '@/components/status-pill';
 import { vendorCopy } from '@/components/vendor/copy';
@@ -18,9 +18,11 @@ const copy = defineCopy(
     today: 'Hoy',
     yesterday: 'Ayer',
     how: 'Cómo pagó',
-    tap: 'Con un toque',
+    via: { NFC: 'Con un toque', LINK: 'Con QR o link', RECURRING: 'Pago automático' } as Record<ChargeChannel, string>,
     landed: 'Llegó a',
     removedWallet: 'Billetera retirada',
+    payee: 'Servicio',
+    concept: 'Concepto',
     code: 'Código',
     receipt: 'Comprobante Paynela',
     share: 'Enviar comprobante',
@@ -31,10 +33,12 @@ const copy = defineCopy(
     when: 'When',
     today: 'Today',
     yesterday: 'Yesterday',
-    how: 'How they paid',
-    tap: 'With a tap',
+    how: 'How it was paid',
+    via: { NFC: 'With a tap', LINK: 'With a QR or link', RECURRING: 'Automatic payment' },
     landed: 'Landed in',
     removedWallet: 'Removed wallet',
+    payee: 'Service',
+    concept: 'For',
     code: 'Code',
     receipt: 'Paynela receipt',
     share: 'Send receipt',
@@ -44,7 +48,8 @@ const copy = defineCopy(
 
 type Props = { sale: VendorSaleView | null; wallets: VendorWalletView[]; onClose: () => void };
 
-// Detail of one sale (design: Detalle de venta): the outcome, the amount, who paid, and a receipt to share.
+// Detail of one sale (design: Detalle de venta): the outcome, the amount, who paid, and a receipt to share. A bill the
+// vendor paid itself (recurring payments) opens here too, as money out.
 export function SaleSheet({ sale, wallets, onClose }: Props) {
   const t = useCopy(copy);
   return (
@@ -63,19 +68,24 @@ function Detail({ sale, wallets, onClose }: Props & { sale: VendorSaleView }) {
   const t = useCopy(copy);
   const v = useCopy(vendorCopy);
   const failed = sale.status === 'FAILED';
-  const amount = formatMoney(sale.amount, sale.assetScale, sale.assetCode, lang);
-  const from = fill(t.from, { name: sale.buyerName ?? v.unregistered });
+  // A payment out shows what left the vendor's wallet (the quote's debit), with a minus sign once it moved.
+  const out = sale.direction === 'OUT';
+  const amount = out ? buyerAmount(sale, lang) : formatMoney(sale.amount, sale.assetScale, sale.assetCode, lang);
+  const shown = out && sale.status === 'PAID' ? `−${amount}` : amount;
+  const from = out ? v.paymentTo(sale.payeeName ?? '—') : fill(t.from, { name: sale.buyerName ?? v.unregistered });
   const wallet = wallets.find((w) => w.id === sale.vendorWalletId);
   const reason = failed ? failureText(sale, v.failure, lang) : '';
+  const outcome = out ? v.status[sale.status] : v.outcome[sale.status];
   const rows: [string, string][] = [
     [t.when, when(sale.paidAt ?? sale.createdAt, lang, t)],
-    [t.how, t.tap],
-    [t.landed, wallet ? walletName(wallet, v.walletNamed) : t.removedWallet],
+    [t.how, t.via[sale.chargedVia ?? 'NFC']],
+    out ? [t.payee, sale.payeeName ?? '—'] : [t.landed, wallet ? walletName(wallet, v.walletNamed) : t.removedWallet],
+    ...(sale.description ? [[t.concept, sale.description] as [string, string]] : []),
     [t.code, `VT-${sale.id.slice(-4).toUpperCase()}`],
   ];
   const share = () =>
     Share.share({
-      message: [t.receipt, `${v.outcome[sale.status]} · ${amount} ${from}`, reason, ...rows.map(([label, value]) => `${label}: ${value}`)]
+      message: [t.receipt, `${outcome} · ${shown} ${from}`, reason, ...rows.map(([label, value]) => `${label}: ${value}`)]
         .filter(Boolean)
         .join('\n'),
     }).catch(() => {});
@@ -84,9 +94,16 @@ function Detail({ sale, wallets, onClose }: Props & { sale: VendorSaleView }) {
     <View accessibilityViewIsModal style={[styles.sheet, { backgroundColor: theme.surface }]}>
       <View style={[styles.handle, { backgroundColor: theme.border }]} />
       <View style={styles.center}>
-        <StatusPill tone={STATUS_TONE[sale.status]} label={v.outcome[sale.status]} />
+        <StatusPill tone={STATUS_TONE[sale.status]} label={outcome} />
         {/* A refused sale moved no money: its amount is struck through in grey (Paynela design system). */}
-        <Text style={[styles.amount, { color: failed ? theme.refused : theme.text }, failed && styles.struck]}>{amount}</Text>
+        <Text
+          style={[
+            styles.amount,
+            { color: failed ? theme.refused : out && sale.status === 'PAID' ? theme.outflow : theme.text },
+            failed && styles.struck,
+          ]}>
+          {shown}
+        </Text>
         <Text style={[styles.from, { color: theme.muted }]}>{from}</Text>
       </View>
       {reason ? (

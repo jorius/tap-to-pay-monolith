@@ -50,6 +50,10 @@ function Navigation() {
         <Stack.Screen name="buyer/activate" options={{ headerTitle: () => <HeaderTitle title={t.titles.activate} /> }} />
         <Stack.Screen name="grant-finish" options={{ headerShown: false, animation: 'none' }} />
         <Stack.Screen name="settings" options={{ headerTitle: () => <HeaderTitle title={t.titles.settings} /> }} />
+        <Stack.Screen name="pay/index" options={{ headerTitle: () => <HeaderTitle title={t.titles.scan} /> }} />
+        <Stack.Screen name="pay/[code]" options={{ headerTitle: () => <HeaderTitle title={t.titles.pay} /> }} />
+        <Stack.Screen name="vendor/recurring" options={{ headerTitle: () => <HeaderTitle title={t.titles.recurring} /> }} />
+        <Stack.Screen name="vendor/statement" options={{ headerTitle: () => <HeaderTitle title={t.titles.statement} /> }} />
         <Stack.Screen
           name="debug"
           options={{ headerTitle: () => <HeaderTitle title={t.titles.debug} />, headerRight: undefined }}

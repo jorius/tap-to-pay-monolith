@@ -22,6 +22,10 @@ export const commonCopy = defineCopy(
       limits: 'Mis límites',
       activate: 'Activar pagos',
       settings: 'Ajustes',
+      scan: 'Pagar con QR o link',
+      pay: 'Pagar',
+      recurring: 'Pagos de servicios',
+      statement: 'Mi historial de negocio',
     },
     api: {
       checking: 'Revisando el servicio. Abrir herramientas de depuración',
@@ -49,6 +53,10 @@ export const commonCopy = defineCopy(
       limits: 'My limits',
       activate: 'Turn on payments',
       settings: 'Settings',
+      scan: 'Pay with a QR or link',
+      pay: 'Pay',
+      recurring: 'Bill payments',
+      statement: 'My business history',
     },
     api: {
       checking: 'Checking the service. Open debug tools',

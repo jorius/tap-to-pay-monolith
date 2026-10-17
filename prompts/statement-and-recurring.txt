@@ -1,0 +1,32 @@
+Read SDD.md sections 7–12 and the current code of tap-to-pay-svc and tap-to-pay-app. Build two features that help a vendor get credit: a monthly financial statement as a PDF that proves its payment capacity, and recurring payments of its bills, which build the payment history that statement shows. Keep every existing flow working.
+
+1. Monthly financial statement (service)
+- Add GET /vendors/:id/statement.pdf?month=YYYY-MM&lang=es|en, rendered with pdfkit (pinned). The month defaults to the current local month (DAILY_LIMIT_TZ); a future one is a 400.
+- Two A4 pages per receiving wallet with activity, so totals never mix assets.
+- Page 1, payment capacity over the last 6 months, averaged from the first month with income:
+  - average and lowest monthly income, and income stability (coefficient of variation: high, medium, low);
+  - average monthly obligations (the vendor's recurring payments, in the wallet's asset), obligations to income, and estimated payment capacity per month;
+  - a month-by-month table: income, sales, days with sales, obligations paid, net flow, payments on time;
+  - a chart of income against obligations;
+  - the payment history (payments on time out of those due) and average monthly growth;
+  - this month's obligations: date, service, reference, amount, status.
+- Page 2, the month's sales: revenue, approved sales, average and median ticket, largest sale, unique and returning customers, approval rate and refusals by reason, change against last month, days with sales, best day, busiest hour, channels (NFC, link or QR, recurring), pending charges, revenue per day and a 6-month trend.
+- Every page ends with a verification code (a SHA-256 of the figures) and a note that balances live in the wallet and the document is not a bank certificate.
+
+2. Recurring payments of the vendor (service)
+- A catalog of Colombian services at GET /billers: EPM, Claro, Tigo, Movistar, ETB and Vanti, each with its brand colour and initials. Each receives into the wallet set in BILLER_WALLETS (id=url pairs), else BILLERS_DEFAULT_WALLET; with neither, it is unavailable. A vendor can also pay any Interledger wallet it types.
+- The vendor pays from its own wallets. Give it a payer identity (Vendor.payerBuyerId): a buyer holding the vendor's wallet addresses, created on first use (GET /vendors/:id/payer), hidden from GET /buyers, and authorized once with npm run grant:buyer.
+- Routes under /vendors/:id/recurring: list, enrol (biller or payee, reference, amount in whole units, day 1 to 28, paying wallet), pause or resume, remove, and pay now. A vendor cannot pay one of its own wallets.
+- A scheduler, run at start and every RECURRING_CHECK_MINUTES, pays each payment on its day at 08:00 local. It claims the month (moves nextRunAt) before charging, so two ticks never charge twice. A refused run is recorded as missed and waits for next month or pay now.
+- Each run is an ordinary sale to a BILLER vendor (Vendor.kind, left out of GET /vendors), charged by chargeSale with chargedVia RECURRING, so the grant and the cross-asset rules apply as for a tap.
+- GET /vendors/:id/sales returns these payments as OUT movements next to the IN sales, with direction=in|out|all.
+
+3. App (vendor)
+- A "Pagos" tab: the enrolled services with pay now, pause and remove; the grant command while a wallet is not authorized; and an "Add payment" sheet with the catalog grid and the form, where Back always goes one step back.
+- Draw each service as a badge in its brand colour with its initials. The logos are trademarks; do not ship them.
+- A "Monthly statement" card on the Panel that opens the PDF for this month or the two before.
+- In Movimientos, show payments out with a minus sign and the service paid, and add an All / Sales / Payments filter. The Panel's latest sales keep only sales.
+
+Rules: add migrations for Vendor.kind, Vendor.payerBuyerId and the RecurringPayment table; the payer wallets' own caps stay open and the grant's debit limit bounds the bills (mark it with shortcut:); never return a grant token. Update .env.example, SDD sections 9, 10 and 12, and AI_USAGE.md.
+
+Tests: every statement figure from a fixture of sales and paid or missed bills, including capacity month by month; a tap purchase of the payer is not an obligation; both languages render a PDF. For recurring payments: the catalog and its config, enrolment and validation, the payer identity, pay now with the vendor's grant and a refusal without it that moves no money, one run per month, two simultaneous ticks that make one charge, pause and resume, and the OUT movements by date, status and wallet. Finish with npm run typecheck and npm test green in tap-to-pay-svc, and tsc and expo lint clean in tap-to-pay-app.

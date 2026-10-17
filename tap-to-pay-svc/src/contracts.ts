@@ -2,6 +2,9 @@
 
 export type SaleStatus = 'AWAITING_TAP' | 'CHARGING' | 'PAID' | 'FAILED';
 
+/** How the buyer reached the charge: a tap on the terminal, or a payment link (WhatsApp or QR). */
+export type ChargeChannel = 'NFC' | 'LINK' | 'RECURRING';
+
 export type SaleFailureCode =
   | 'BUYER_UNKNOWN'
   | 'GRANT_MISSING'
@@ -24,6 +27,11 @@ export type HttpErrorCode =
   | 'GRANT_FAILED'
   | 'GRANT_NOT_PENDING'
   | 'GRANT_HASH_MISMATCH'
+  | 'PAYMENT_LINK_NOT_FOUND'
+  | 'PAYMENT_LINK_EXPIRED'
+  | 'BILLER_NOT_FOUND'
+  | 'BILLER_UNAVAILABLE'
+  | 'RECURRING_NOT_FOUND'
   | 'INTERNAL';
 
 export type SaleView = {
@@ -53,7 +61,51 @@ export type SaleView = {
   debitAssetScale: number | null;
   failureCode: string | null;
   failureMessage: string | null;
+  /** What the sale is for, as the vendor typed it; null when none. */
+  description: string | null;
+  /** How the buyer reached the charge; null until a charge is attempted. */
+  chargedVia: ChargeChannel | null;
   createdAt: string;
+  paidAt: string | null;
+};
+
+/**
+ * POST /sales/:id/payment-link: one public link per sale, also shown as a QR and sent by WhatsApp. The same sale can
+ * still be charged by NFC; whichever channel charges first wins.
+ */
+export type PaymentLinkView = {
+  code: string;
+  saleId: string;
+  /** The link to share: a web page that previews the charge and opens the app. Also the QR's content. */
+  url: string;
+  /** Opens the app's payment screen directly. */
+  appUrl: string;
+  /** The text to encode in a QR; equal to url. */
+  qrPayload: string;
+  /** The QR as an SVG image. */
+  qrSvgUrl: string;
+  /** Opens WhatsApp with `message` written, to the given phone when one was passed. */
+  whatsappUrl: string;
+  message: string;
+  expiresAt: string;
+};
+
+/** GET /pay/:code: what the buyer sees before paying. Never carries wallet URLs. */
+export type PaymentRequestView = {
+  code: string;
+  saleId: string;
+  vendorName: string;
+  amount: string;
+  amountFormatted: string;
+  assetCode: string;
+  assetScale: number;
+  description: string | null;
+  status: SaleStatus;
+  expiresAt: string;
+  /** True once expiresAt has passed while the sale is still unpaid; such a link can no longer be charged. */
+  expired: boolean;
+  failureCode: string | null;
+  failureMessage: string | null;
   paidAt: string | null;
 };
 
@@ -150,10 +202,73 @@ export type VendorSummary = {
 };
 
 /**
- * GET /vendors/:id/sales: newest first. buyerName is the paying wallet's publicName, else the buyer's registered name;
- * null only for BUYER_UNKNOWN refusals, which have no wallet to point at.
+ * GET /vendors/:id/sales: the vendor's movements, newest first. IN is a sale the vendor received: buyerName is the paying
+ * wallet's publicName, else the buyer's registered name, null only for BUYER_UNKNOWN refusals. OUT is a recurring
+ * payment the vendor made: payeeName is the service it paid, and debitAmount what left the vendor's wallet.
  */
-export type VendorSaleView = SaleView & { buyerName: string | null };
+export type VendorSaleView = SaleView & {
+  direction: 'IN' | 'OUT';
+  buyerName: string | null;
+  /** The service an OUT movement paid; null for IN. */
+  payeeName: string | null;
+};
+
+/** GET /billers: the catalog of services a buyer can pay every month. */
+export type BillerView = {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  /** The badge the app draws: the brand colour, the text colour on it and the initials. */
+  color: string;
+  textColor: string;
+  initials: string;
+  /** What the buyer's reference is called at this service: "Número de contrato", "Número de línea", … */
+  referenceLabel: string;
+  /** False when no Interledger wallet is configured for it (BILLER_WALLETS, BILLERS_DEFAULT_WALLET). */
+  available: boolean;
+};
+
+/**
+ * GET /vendors/:id/payer: the vendor as a payer, for its recurring payments. Each of the vendor's wallets is a payer
+ * wallet too; one pays once it is authorized (hasGrant) with grantCommand.
+ */
+export type VendorPayerView = {
+  buyerId: string;
+  wallets: {
+    id: string;
+    walletAddress: string;
+    publicName: string | null;
+    assetCode: string;
+    assetScale: number;
+    hasGrant: boolean;
+    isDefault: boolean;
+    /** What authorizes it, run in tap-to-pay-svc: npm run grant:buyer -- --buyer <walletAddress> */
+    grantCommand: string;
+  }[];
+};
+
+/** GET /vendors/:id/recurring: one monthly payment of the vendor, in the payee's asset. */
+export type RecurringView = {
+  id: string;
+  billerId: string | null;
+  payeeName: string;
+  payeeWalletAddress: string;
+  reference: string | null;
+  amount: string;
+  amountFormatted: string;
+  assetCode: string;
+  assetScale: number;
+  dayOfMonth: number;
+  /** The paying wallet, one of the vendor's payer wallets; null when the default one pays. */
+  walletId: string | null;
+  active: boolean;
+  nextRunAt: string;
+  lastRunAt: string | null;
+  lastSaleId: string | null;
+  lastStatus: SaleStatus | null;
+  lastMessage: string | null;
+};
 
 export type Envelope<T> =
   | { data: T; error: null }

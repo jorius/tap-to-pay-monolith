@@ -55,6 +55,7 @@ const copy = defineCopy(
     notPaid: 'No se pagó',
     inProgress: 'En curso',
     pickAgain: 'Elegir otro comprador',
+    payByLink: 'Pagar con QR o link',
   },
   {
     hello: (name: string) => `Hi, ${name}`,
@@ -90,6 +91,7 @@ const copy = defineCopy(
     notPaid: 'Not paid',
     inProgress: 'In progress',
     pickAgain: 'Pick another buyer',
+    payByLink: 'Pay with a QR or link',
   },
 );
 
@@ -270,6 +272,8 @@ function Home({ buyer, wallets, defaultWallet, lastSale }: HomeProps) {
         />
         <Tile icon="clock-outline" title={t.lastPayment} body={lastText} onPress={() => router.push('/buyer/history')} />
       </View>
+      {/* A vendor without NFC shows a QR or sends a WhatsApp link (SDD §10, "Payment links and QR"). */}
+      <BigButton label={t.payByLink} color={Fills.primary} ghost onPress={() => router.push('/pay')} />
     </>
   );
 }

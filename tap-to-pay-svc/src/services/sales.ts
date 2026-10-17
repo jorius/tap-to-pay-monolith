@@ -1,4 +1,4 @@
-import type { SaleView } from '../contracts.js';
+import type { ChargeChannel, SaleView } from '../contracts.js';
 import type { BuyerWalletRow, Limits, Repo, SaleRow } from '../db/repos.js';
 import {
   isClientError,
@@ -8,7 +8,7 @@ import {
   type Quote,
   type WalletInfo,
 } from '../open-payments/types.js';
-import { HttpError } from './errors.js';
+import { HttpError, validation } from './errors.js';
 import type { PendingGrants } from './grants.js';
 import { checkLimits, checkWallet, dayRange, sameAsset, type ChargeCheck } from './limits.js';
 import { parseAmount, toAmount } from './money.js';
@@ -26,16 +26,30 @@ export type Deps = {
   defaultLimits: Limits;
   /** Authorizations started from the app and not finished yet. */
   pendingGrants: PendingGrants;
+  /** Payment links: how long one lives, the base URL to build it on (PUBLIC_URL, else the request's), the app's scheme. */
+  links: { ttlMinutes: number; publicUrl?: string; appScheme: string };
+  /** Recurring payments: the wallet each catalog biller receives into (BILLER_WALLETS), else the default one. */
+  billers: { wallets: Record<string, string>; defaultWallet?: string };
 };
 
-/** POST /sales: received into `walletId`, one of the vendor's wallets, else the default one, and priced in its asset. */
+const DESCRIPTION_MAX = 140;
+
+/**
+ * POST /sales: received into `walletId`, one of the vendor's wallets, else the default one, and priced in its asset.
+ * `description` is what the sale is for, shown to the buyer on a payment link.
+ */
 export async function createSale(
   deps: Deps,
   vendorId: string,
   amountInput: string,
   walletId?: string,
+  descriptionInput?: string,
 ): Promise<SaleView> {
   const amount = parseAmount(amountInput);
+  const description = descriptionInput?.trim() || null;
+  if (description && description.length > DESCRIPTION_MAX) {
+    throw validation(`description must be at most ${DESCRIPTION_MAX} characters`);
+  }
   const vendor = await deps.repo.getVendor(vendorId);
   if (!vendor) throw new HttpError(404, 'VENDOR_NOT_FOUND', `Vendor ${vendorId} not found`);
   const wallet = walletId === undefined ? defaultWallet(vendor) : ownVendorWallet(vendor, walletId);
@@ -45,18 +59,28 @@ export async function createSale(
     amount,
     assetCode: wallet.assetCode,
     assetScale: wallet.assetScale,
+    description,
     createdAt: deps.now(),
   });
   return saleView(sale, wallet.publicName ?? vendor.name);
 }
 
-/** POST /sales/:id/charge: the charge, answered with the buyer named for the vendor's screen. */
-export async function chargeSale(deps: Deps, saleId: string, walletAddress: string): Promise<SaleView> {
-  return withBuyerName(deps.repo, await runCharge(deps, saleId, walletAddress));
+/**
+ * POST /sales/:id/charge, a payment link or a recurring payment: the charge, answered with the buyer named for the
+ * vendor's screen. `via` records how the buyer reached it (NFC tap, LINK, RECURRING); the rules and wallet calls are
+ * the same.
+ */
+export async function chargeSale(
+  deps: Deps,
+  saleId: string,
+  walletAddress: string,
+  via: ChargeChannel = 'NFC',
+): Promise<SaleView> {
+  return withBuyerName(deps.repo, await runCharge(deps, saleId, walletAddress, via));
 }
 
 /** The per-sale orchestration of SDD section 10, steps 3 to 9. */
-async function runCharge(deps: Deps, saleId: string, walletAddress: string): Promise<SaleView> {
+async function runCharge(deps: Deps, saleId: string, walletAddress: string, via: ChargeChannel): Promise<SaleView> {
   const { repo, op } = deps;
 
   // 3. The sale and the paying wallet, whichever buyer owns it.
@@ -70,19 +94,20 @@ async function runCharge(deps: Deps, saleId: string, walletAddress: string): Pro
   // 4. The rules, all on that wallet: card and grant always come before any wallet call; so do the caps when
   // both wallets share an asset. In another asset the caps wait for the quote, which knows the debit.
   const walletCheck = checkWallet(wallet);
-  if (!walletCheck.ok) return refuse(repo, saleId, walletCheck, wallet);
+  if (!walletCheck.ok) return refuse(repo, saleId, walletCheck, wallet, via);
   const payer = wallet!;
   const spentToday = await repo.sumSpent(payer.id, dayRange(deps.now(), deps.timeZone));
   const crossAsset = !sameAsset(payer, sale);
   if (!crossAsset) {
     const limits = checkLimits(payer, sale.amount, spentToday);
-    if (!limits.ok) return refuse(repo, saleId, limits, payer);
+    if (!limits.ok) return refuse(repo, saleId, limits, payer, via);
   }
 
   // 5. The claim. From here the debit counts toward that wallet's day (a cross-asset one once quoted).
   // shortcut: the sum above runs outside a lock, so two sales at the same instant can both pass the cap.
   let current = await repo.transitionSale(saleId, 'AWAITING_TAP', {
     status: 'CHARGING',
+    chargedVia: via,
     buyerId: payer.buyerId,
     buyerWalletId: payer.id,
     ...(crossAsset
@@ -220,9 +245,11 @@ async function refuse(
   saleId: string,
   check: ChargeCheck & { ok: false },
   payer: BuyerWalletRow | null,
+  via: ChargeChannel,
 ): Promise<SaleView> {
   const failed = await repo.transitionSale(saleId, 'AWAITING_TAP', {
     status: 'FAILED',
+    chargedVia: via,
     failureCode: check.code,
     failureMessage: check.message,
     ...(payer && { buyerId: payer.buyerId, buyerWalletId: payer.id }),
@@ -231,7 +258,7 @@ async function refuse(
   return saleView(failed);
 }
 
-async function loadSale(repo: Repo, saleId: string): Promise<SaleRow> {
+export async function loadSale(repo: Repo, saleId: string): Promise<SaleRow> {
   const sale = await repo.getSale(saleId);
   if (!sale) throw new HttpError(404, 'SALE_NOT_FOUND', `Sale ${saleId} not found`);
   return sale;

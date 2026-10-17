@@ -4,6 +4,10 @@ export const apiUrl = (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4000
 
 const TIMEOUT_MS = 5000;
 
+// Port-forward hosts (VS Code dev tunnels, ngrok) can answer with a browser warning page instead of the API. The QR image
+// request sends them too, or the tunnel would answer HTML where an image is expected.
+export const tunnelHeaders = { 'X-Tunnel-Skip-AntiPhishing-Page': 'true', 'ngrok-skip-browser-warning': '1' };
+
 export class ApiError extends Error {
   code: string;
   status: number;
@@ -29,12 +33,7 @@ export async function api<T>(path: string, init: Init = {}): Promise<T> {
     try {
       res = await fetch(`${apiUrl}${path}`, {
         method: init.method ?? 'GET',
-        headers: {
-          'content-type': 'application/json',
-          // Port-forward hosts (VS Code dev tunnels, ngrok) can answer with a browser warning page instead of the API.
-          'X-Tunnel-Skip-AntiPhishing-Page': 'true',
-          'ngrok-skip-browser-warning': '1',
-        },
+        headers: { 'content-type': 'application/json', ...tunnelHeaders },
         body: init.body === undefined ? undefined : JSON.stringify(init.body),
         signal: controller.signal,
       });

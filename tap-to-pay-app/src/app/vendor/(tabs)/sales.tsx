@@ -30,7 +30,7 @@ const copy = defineCopy(
     seeBalance: 'Ver saldo en mi billetera',
     failed: (n: number) => (n === 1 ? '1 cobro no pasó · no suma a tus ventas' : `${n} cobros no pasaron · no suman a tus ventas`),
     status: 'Estado',
-    filters: { ALL: 'Todas', PAID: 'Recibidas', FAILED: 'No pasaron' },
+    filters: { ALL: 'Todas', PAID: 'Recibidas', FAILED: 'No pasaron', OUT: 'Pagos' },
     empty: 'Aún no hay ventas en este periodo.',
   },
   {
@@ -43,16 +43,17 @@ const copy = defineCopy(
     seeBalance: 'See balance in my wallet',
     failed: (n: number) => (n === 1 ? "1 charge didn't go through · not counted" : `${n} charges didn't go through · not counted`),
     status: 'Status',
-    filters: { ALL: 'All', PAID: 'Received', FAILED: "Didn't go through" },
+    filters: { ALL: 'All', PAID: 'Received', FAILED: "Didn't go through", OUT: 'Payments' },
     empty: 'No sales in this period yet.',
   },
 );
 
-type Filter = 'ALL' | 'PAID' | 'FAILED';
+// OUT: the bills the vendor paid itself (recurring payments), money out; the others filter its sales.
+type Filter = 'ALL' | 'PAID' | 'FAILED' | 'OUT';
 type Shown = { range: SummaryRange; walletId: string | null; filter: Filter };
 
 const RANGES: SummaryRange[] = ['today', 'week', 'month'];
-const FILTERS: Filter[] = ['ALL', 'PAID', 'FAILED'];
+const FILTERS: Filter[] = ['ALL', 'PAID', 'FAILED', 'OUT'];
 
 export default function SalesScreen() {
   return <VendorGate>{(vendor, _replace, reload) => <Sales vendor={vendor} reload={reload} />}</VendorGate>;
@@ -79,11 +80,12 @@ function SalesBody({ vendor, shown, setShown, reload }: BodyProps) {
   // Yesterday is the week's second-to-last daily bucket (SDD §9: 7 local days ending today).
   const week = useApi<VendorSummary>(shown.range === 'today' ? `/vendors/${vendor.id}/summary?range=week&walletId=${wallet.id}` : null);
   // shortcut: the newest 200 sales, filtered on the phone by period and status; a month with more shows its latest 200.
-  const sales = useApi<VendorSaleView[]>(`/vendors/${vendor.id}/sales?limit=200&walletId=${wallet.id}`);
+  const direction = shown.filter === 'OUT' ? 'out' : 'in';
+  const sales = useApi<VendorSaleView[]>(`/vendors/${vendor.id}/sales?limit=200&walletId=${wallet.id}&direction=${direction}`);
   const [selected, setSelected] = useState<VendorSaleView | null>(null);
   const data = summary.data;
   const rows = data
-    ? sales.data?.filter((s) => Date.parse(s.createdAt) >= Date.parse(data.from) && (shown.filter === 'ALL' || s.status === shown.filter))
+    ? sales.data?.filter((s) => Date.parse(s.createdAt) >= Date.parse(data.from) && (shown.filter === 'ALL' || shown.filter === 'OUT' || s.status === shown.filter))
     : undefined;
   const buckets = week.data?.buckets;
   const yesterday = buckets && buckets.length > 1 ? buckets[buckets.length - 2].total : undefined;

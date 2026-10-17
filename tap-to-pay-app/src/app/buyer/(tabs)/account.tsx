@@ -26,6 +26,7 @@ const copy = defineCopy(
     noGrant: 'Falta darle permiso',
     ready: 'Lista para usar',
     activate: 'Activar',
+    permission: 'Permiso',
     useThis: 'Usar para pagar',
     remove: 'Quitar',
     removeTitle: (name: string) => `¿Quitar ${name}?`,
@@ -47,6 +48,7 @@ const copy = defineCopy(
     noGrant: 'Needs your permission',
     ready: 'Ready to use',
     activate: 'Turn on',
+    permission: 'Permission',
     useThis: 'Use to pay',
     remove: 'Remove',
     removeTitle: (name: string) => `Remove ${name}?`,
@@ -212,8 +214,15 @@ function WalletCard({ wallet, name, busy, canRemove, onUse, onRemove }: WalletCa
           </Pressable>
         )}
       </View>
-      {(!wallet.isDefault || canRemove) && (
+      {(wallet.hasGrant || !wallet.isDefault || canRemove) && (
         <View style={styles.actions}>
+          {wallet.hasGrant && (
+            <TextLink
+              label={t.permission}
+              color={theme.primaryInk}
+              onPress={() => router.push({ pathname: '/buyer/grant', params: { walletId: wallet.id } })}
+            />
+          )}
           {!wallet.isDefault && <TextLink label={t.useThis} color={theme.primaryInk} disabled={busy} onPress={onUse} />}
           {canRemove && <TextLink label={t.remove} color={theme.outflow} disabled={busy} onPress={onRemove} />}
         </View>
