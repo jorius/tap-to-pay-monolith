@@ -92,6 +92,13 @@ model Sale {
   outgoingPaymentUrl String?
   failureCode        String?
   failureMessage     String?
+  // What the sale is for, shown to the buyer on the payment link and in WhatsApp.
+  description        String?
+  // The payment link's public code: the link and its QR never expose the sale id.
+  payCode            String?       @unique
+  payCodeExpiresAt   DateTime?
+  // How the buyer reached the charge: NFC (tap) or LINK (WhatsApp link or QR). Set when a charge is attempted.
+  chargedVia         String?
   createdAt          DateTime      @default(now())
   paidAt             DateTime?
 

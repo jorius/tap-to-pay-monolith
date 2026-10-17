@@ -1,6 +1,9 @@
 // The views of SDD section 9; keep them in step with the service's src/contracts.ts.
 export type SaleStatus = 'AWAITING_TAP' | 'CHARGING' | 'PAID' | 'FAILED';
 
+// How the buyer reached the charge: a tap on the terminal, or the sale's payment link (WhatsApp or QR).
+export type ChargeChannel = 'NFC' | 'LINK';
+
 export type SaleView = {
   id: string;
   vendorId: string;
@@ -22,7 +25,47 @@ export type SaleView = {
   debitAssetScale: number | null;
   failureCode: string | null;
   failureMessage: string | null;
+  // What the sale is for, as the vendor typed it; null when none.
+  description: string | null;
+  // How the buyer reached the charge; null until a charge is attempted.
+  chargedVia: ChargeChannel | null;
   createdAt: string;
+  paidAt: string | null;
+};
+
+// POST /sales/:id/payment-link: the sale's link, shared by WhatsApp or shown as a QR. The sale can still be tapped; the
+// first channel that charges it wins.
+export type PaymentLinkView = {
+  code: string;
+  saleId: string;
+  // The web page that previews the charge and opens the app; also the QR's content.
+  url: string;
+  // Opens this app's payment screen directly.
+  appUrl: string;
+  qrPayload: string;
+  qrSvgUrl: string;
+  // wa.me with `message` written.
+  whatsappUrl: string;
+  message: string;
+  expiresAt: string;
+};
+
+// GET /pay/:code: what the buyer sees before paying a link. Never carries wallet URLs.
+export type PaymentRequestView = {
+  code: string;
+  saleId: string;
+  vendorName: string;
+  amount: string;
+  amountFormatted: string;
+  assetCode: string;
+  assetScale: number;
+  description: string | null;
+  status: SaleStatus;
+  expiresAt: string;
+  // True once expiresAt passed while the sale is unpaid; such a link can no longer be charged.
+  expired: boolean;
+  failureCode: string | null;
+  failureMessage: string | null;
   paidAt: string | null;
 };
 

@@ -7,6 +7,10 @@ import { NfcTap } from '@/nfc/nfc-tap';
 // The vendor sale state machine of SDD section 6.
 export type SaleState = 'idle' | 'awaiting_tap' | 'nfc_error' | 'charging' | 'paid' | 'failed' | 'not_confirmed';
 
+// Whether this phone can read the buyer's card for the sale on screen. Without it the sale still waits, to be paid through
+// its QR or WhatsApp link (SDD §10, "Payment links and QR").
+export type ReaderState = 'on' | 'no_nfc' | 'nfc_off' | 'no_module';
+
 // What fails on the phone before or around a charge; refusals by the service arrive on the sale instead.
 export type AppFailure = { code: 'NO_NFC' | 'NFC_OFF' | 'NO_NFC_MODULE' | 'API'; error?: ApiError };
 
@@ -16,19 +20,23 @@ type Snapshot = {
   walletAddress: string | null;
   nfcError: string | null;
   failure: AppFailure | null;
+  reader: ReaderState;
 };
 
-const RESET: Omit<Snapshot, 'state'> = { sale: null, walletAddress: null, nfcError: null, failure: null };
+const RESET: Omit<Snapshot, 'state'> = { sale: null, walletAddress: null, nfcError: null, failure: null, reader: 'on' };
 const POLL_MS = 1000;
 const MAX_POLLS = 30;
+// While waiting for a tap, how often the sale is re-read: its payment link (WhatsApp or QR) can charge it meanwhile.
+const WATCH_MS = 2000;
 // The charge blocks up to CHARGE_POLL_SECONDS plus wallet latency (SDD §9).
 const CHARGE_TIMEOUT_MS = 30_000;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const toApiError = (e: unknown) => (e instanceof ApiError ? e : new ApiError('UNKNOWN', String(e), 0));
 
-// simulate: the debug-only tap is allowed, so a phone without the NfcTap module can still create and charge sales.
-export function useSale(vendorId: string, { simulate }: { simulate: boolean }) {
+// Every phone can create sales: one without NFC (or with NFC off) is paid through the sale's QR or WhatsApp link. With
+// debug labels on, a phone without the NfcTap module also gets the simulated tap.
+export function useSale(vendorId: string) {
   const [snap, setSnap] = useState<Snapshot>({ state: 'idle', ...RESET });
   const [starting, setStarting] = useState(false);
   const stateRef = useRef<SaleState>('idle');
@@ -124,12 +132,14 @@ export function useSale(vendorId: string, { simulate }: { simulate: boolean }) {
   const charge = useCallback(
     async (amount: string) => {
       if (stateRef.current !== 'idle' || startingRef.current) return;
-      if (NfcTap) {
-        if (!NfcTap.isSupported()) return go('failed', { failure: { code: 'NO_NFC' } });
-        if (!NfcTap.isEnabled()) return go('failed', { failure: { code: 'NFC_OFF' } });
-      } else if (!simulate) {
-        return go('failed', { failure: { code: 'NO_NFC_MODULE' } });
-      }
+      // No NFC is no longer a dead end: the sale is created anyway and paid through its QR or WhatsApp link.
+      const reader: ReaderState = !NfcTap
+        ? 'no_module'
+        : !NfcTap.isSupported()
+          ? 'no_nfc'
+          : !NfcTap.isEnabled()
+            ? 'nfc_off'
+            : 'on';
       const run = ++runRef.current;
       startingRef.current = true;
       setStarting(true);
@@ -137,8 +147,8 @@ export function useSale(vendorId: string, { simulate }: { simulate: boolean }) {
         const sale = await api<SaleView>('/sales', { method: 'POST', body: { vendorId, amount } });
         if (runRef.current !== run) return;
         // Normally already on; re-enabling is harmless and covers a reader that failed to start with the tabs.
-        NfcTap?.startReader();
-        go('awaiting_tap', { ...RESET, sale });
+        if (reader === 'on') NfcTap?.startReader();
+        go('awaiting_tap', { ...RESET, sale, reader });
       } catch (e) {
         if (runRef.current === run) go('failed', { failure: { code: 'API', error: toApiError(e) } });
       } finally {
@@ -146,7 +156,7 @@ export function useSale(vendorId: string, { simulate }: { simulate: boolean }) {
         setStarting(false);
       }
     },
-    [go, simulate, vendorId],
+    [go, vendorId],
   );
 
   // Cancel leaves the sale AWAITING_TAP, which never counts toward a limit (SDD §8); New sale uses it too.
@@ -171,6 +181,33 @@ export function useSale(vendorId: string, { simulate }: { simulate: boolean }) {
       error.remove();
     };
   }, [go, tap]);
+
+  // A sale waiting for a tap can also be charged through its payment link. Re-read it, and once it leaves AWAITING_TAP
+  // follow it as if it had been tapped. A tap moves the state to charging first, so the two never both follow a sale.
+  const waitingId = snap.state === 'awaiting_tap' || snap.state === 'nfc_error' ? snap.sale?.id : undefined;
+  useEffect(() => {
+    if (!waitingId) return;
+    const run = runRef.current;
+    const waiting = () => runRef.current === run && (stateRef.current === 'awaiting_tap' || stateRef.current === 'nfc_error');
+    const timer = setInterval(async () => {
+      if (!waiting()) return;
+      let sale: SaleView;
+      try {
+        sale = await api<SaleView>(`/sales/${waitingId}`);
+      } catch {
+        return; // the next read tries again
+      }
+      if (!waiting() || sale.status === 'AWAITING_TAP') return;
+      console.log(`[nfc] sale ${sale.id} charged through its payment link: ${sale.status}`);
+      if (sale.status === 'CHARGING') {
+        go('charging', { sale, walletAddress: null });
+        poll(sale.id, run);
+      } else {
+        finish(sale);
+      }
+    }, WATCH_MS);
+    return () => clearInterval(timer);
+  }, [finish, go, poll, waitingId]);
 
   useEffect(
     () => () => {

@@ -12,10 +12,11 @@ import { ThemedView } from '@/components/themed-view';
 import { vendorCopy } from '@/components/vendor/copy';
 import { errorText, failureText, fill, time } from '@/components/vendor/format';
 import { Keypad } from '@/components/vendor/keypad';
+import { ShareSale } from '@/components/vendor/share-sale';
 import { SimulateTap } from '@/components/vendor/simulate-tap';
 import { VendorGate } from '@/components/vendor/vendor-gate';
 import { Brand, Fill, roleColors } from '@/constants/theme';
-import { useSale, type AppFailure } from '@/hooks/use-sale';
+import { useSale, type AppFailure, type ReaderState } from '@/hooks/use-sale';
 import { useSession } from '@/hooks/use-session';
 import { useTheme } from '@/hooks/use-theme';
 import { defineCopy, useCopy, useLang } from '@/i18n';
@@ -37,6 +38,7 @@ const copy = defineCopy(
     nfcRetry: 'Inténtalo de nuevo: acerca más los teléfonos',
     readerStays: 'El lector sigue encendido.',
     walletRead: 'Billetera leída',
+    viaLink: 'Pago recibido por link o QR',
     charging: 'cobrando…',
     paid: '✓ Pagado',
     paidAt: 'a las {time}',
@@ -47,6 +49,10 @@ const copy = defineCopy(
     noNfc: 'Este teléfono no tiene NFC',
     noNfcModule: 'Este build no trae todavía el módulo NFC (NfcTap). Activa las etiquetas de depuración en Ajustes para simular el toque.',
     nfcOff: 'Enciende el NFC en Ajustes',
+    readerOff: 'venta {id} · sin lector NFC',
+    noNfcHere: 'Este teléfono no tiene NFC: cobra con el QR o por WhatsApp.',
+    nfcOffHere: 'El NFC está apagado: enciéndelo en Ajustes, o cobra con el QR o por WhatsApp.',
+    noModuleHere: 'Este build no trae el lector NFC: cobra con el QR o por WhatsApp.',
   },
   {
     amount: 'Amount',
@@ -63,6 +69,7 @@ const copy = defineCopy(
     nfcRetry: 'Try again: hold the phones closer',
     readerStays: 'The reader stays on.',
     walletRead: 'Wallet read',
+    viaLink: 'Payment received through the link or QR',
     charging: 'charging…',
     paid: '✓ Paid',
     paidAt: 'at {time}',
@@ -73,6 +80,10 @@ const copy = defineCopy(
     noNfc: 'This phone has no NFC',
     noNfcModule: "This build doesn't include the NFC module (NfcTap) yet. Turn on debug labels in Settings to simulate the tap.",
     nfcOff: 'Turn NFC on in Settings',
+    readerOff: 'sale {id} · no NFC reader',
+    noNfcHere: 'This phone has no NFC: charge with the QR or by WhatsApp.',
+    nfcOffHere: 'NFC is off: turn it on in Settings, or charge with the QR or by WhatsApp.',
+    noModuleHere: "This build doesn't include the NFC reader: charge with the QR or by WhatsApp.",
   },
 );
 
@@ -91,7 +102,7 @@ function Terminal({ vendor, reload }: { vendor: VendorView; reload: () => Promis
   const v = useCopy(vendorCopy);
   const { debugLabels } = useSession();
   const colors = roleColors(theme, 'vendor');
-  const sale = useSale(vendor.id, { simulate: debugLabels });
+  const sale = useSale(vendor.id);
   const [digits, setDigits] = useState('1200');
   // The keypad prices in the receiving wallet (the top-level fields); a created sale keeps its own wallet and asset even
   // if the receiving wallet changes before the tap.
@@ -162,11 +173,18 @@ function Terminal({ vendor, reload }: { vendor: VendorView; reload: () => Promis
 
       {(sale.state === 'awaiting_tap' || sale.state === 'nfc_error') && (
         <>
-          <View style={[styles.tapCircle, { backgroundColor: colors.tint }]}>
-            <MaterialCommunityIcons name="contactless-payment" size={104} color={Brand.vendor} />
-          </View>
-          {sale.state === 'awaiting_tap' ? (
+          {sale.reader !== 'on' ? (
             <>
+              <Text style={[styles.lead, { color: theme.text }]}>{readerText(sale.reader, t)}</Text>
+              <View style={styles.center}>
+                <StatusPill tone="wait" label={fill(t.readerOff, { id: sale.sale?.id ?? '' })} />
+              </View>
+            </>
+          ) : sale.state === 'awaiting_tap' ? (
+            <>
+              <View style={[styles.tapCircle, { backgroundColor: colors.tint }]}>
+                <MaterialCommunityIcons name="contactless-payment" size={104} color={Brand.vendor} />
+              </View>
               <Text style={[styles.lead, { color: theme.text }]}>{t.hold}</Text>
               <View style={styles.center}>
                 <StatusPill
@@ -177,6 +195,9 @@ function Terminal({ vendor, reload }: { vendor: VendorView; reload: () => Promis
             </>
           ) : (
             <>
+              <View style={[styles.tapCircle, { backgroundColor: colors.tint }]}>
+                <MaterialCommunityIcons name="contactless-payment" size={104} color={Brand.vendor} />
+              </View>
               <View style={styles.center}>
                 <StatusPill tone="bad" label={sale.nfcError ?? ''} />
               </View>
@@ -186,6 +207,7 @@ function Terminal({ vendor, reload }: { vendor: VendorView; reload: () => Promis
               </ThemedText>
             </>
           )}
+          {sale.sale && <ShareSale saleId={sale.sale.id} amount={saleAmount} />}
           {debugLabels && <SimulateTap onTap={sale.tap} />}
           <BigButton label={t.cancel} color={colors.ink} ghost onPress={sale.reset} />
         </>
@@ -195,8 +217,14 @@ function Terminal({ vendor, reload }: { vendor: VendorView; reload: () => Promis
         <>
           <ActivityIndicator size="large" color={Brand.vendor} style={styles.spinner} />
           <ThemedView card style={styles.center}>
-            <ThemedText type="caption">{t.walletRead}</ThemedText>
-            <Text style={[styles.mono, { color: theme.text }]}>{sale.walletAddress}</Text>
+            {sale.walletAddress ? (
+              <>
+                <ThemedText type="caption">{t.walletRead}</ThemedText>
+                <Text style={[styles.mono, { color: theme.text }]}>{sale.walletAddress}</Text>
+              </>
+            ) : (
+              <ThemedText type="caption">{t.viaLink}</ThemedText>
+            )}
           </ThemedView>
           <View style={styles.center} accessibilityLiveRegion="polite">
             <StatusPill tone="wait" label={t.charging} />
@@ -237,6 +265,12 @@ function Terminal({ vendor, reload }: { vendor: VendorView; reload: () => Promis
       )}
     </Screen>
   );
+}
+
+function readerText(reader: ReaderState, t: (typeof copy)['es']) {
+  if (reader === 'no_nfc') return t.noNfcHere;
+  if (reader === 'nfc_off') return t.nfcOffHere;
+  return t.noModuleHere;
 }
 
 function appFailureText(failure: AppFailure | null, t: (typeof copy)['es'], networkTemplate: string) {

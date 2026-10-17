@@ -2,6 +2,9 @@
 
 export type SaleStatus = 'AWAITING_TAP' | 'CHARGING' | 'PAID' | 'FAILED';
 
+/** How the buyer reached the charge: a tap on the terminal, or a payment link (WhatsApp or QR). */
+export type ChargeChannel = 'NFC' | 'LINK';
+
 export type SaleFailureCode =
   | 'BUYER_UNKNOWN'
   | 'GRANT_MISSING'
@@ -21,6 +24,8 @@ export type HttpErrorCode =
   | 'LAST_WALLET'
   | 'SALE_NOT_FOUND'
   | 'SALE_NOT_CHARGEABLE'
+  | 'PAYMENT_LINK_NOT_FOUND'
+  | 'PAYMENT_LINK_EXPIRED'
   | 'INTERNAL';
 
 export type SaleView = {
@@ -45,7 +50,51 @@ export type SaleView = {
   debitAssetScale: number | null;
   failureCode: string | null;
   failureMessage: string | null;
+  /** What the sale is for, as the vendor typed it; null when none. */
+  description: string | null;
+  /** How the buyer reached the charge; null until a charge is attempted. */
+  chargedVia: ChargeChannel | null;
   createdAt: string;
+  paidAt: string | null;
+};
+
+/**
+ * POST /sales/:id/payment-link: one public link per sale, also shown as a QR and sent by WhatsApp. The same sale can
+ * still be charged by NFC; whichever channel charges first wins.
+ */
+export type PaymentLinkView = {
+  code: string;
+  saleId: string;
+  /** The link to share: a web page that previews the charge and opens the app. Also the QR's content. */
+  url: string;
+  /** Opens the app's payment screen directly. */
+  appUrl: string;
+  /** The text to encode in a QR; equal to url. */
+  qrPayload: string;
+  /** The QR as an SVG image. */
+  qrSvgUrl: string;
+  /** Opens WhatsApp with `message` written, to the given phone when one was passed. */
+  whatsappUrl: string;
+  message: string;
+  expiresAt: string;
+};
+
+/** GET /pay/:code: what the buyer sees before paying. Never carries wallet URLs. */
+export type PaymentRequestView = {
+  code: string;
+  saleId: string;
+  vendorName: string;
+  amount: string;
+  amountFormatted: string;
+  assetCode: string;
+  assetScale: number;
+  description: string | null;
+  status: SaleStatus;
+  expiresAt: string;
+  /** True once expiresAt has passed while the sale is still unpaid; such a link can no longer be charged. */
+  expired: boolean;
+  failureCode: string | null;
+  failureMessage: string | null;
   paidAt: string | null;
 };
 

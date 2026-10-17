@@ -77,6 +77,13 @@ export type SaleRow = {
   outgoingPaymentUrl: string | null;
   failureCode: string | null;
   failureMessage: string | null;
+  /** What the sale is for; shown on the payment link. */
+  description: string | null;
+  /** The payment link's public code and when it stops working; null until a link is created. */
+  payCode: string | null;
+  payCodeExpiresAt: Date | null;
+  /** NFC or LINK: how the buyer reached the charge; null until a charge is attempted. */
+  chargedVia: string | null;
   createdAt: Date;
   paidAt: Date | null;
 };
@@ -86,7 +93,8 @@ export type SaleWithVendor = SaleRow & { vendorName: string; vendorPublicName: s
 export type SaleWithBuyer = SaleRow & { buyerName: string | null; buyerPublicName: string | null };
 export type VendorSaleQuery = { statuses: SaleStatus[]; from?: Date; to?: Date; limit?: number; walletId?: string };
 export type SalePatch = Partial<Omit<SaleRow, 'id' | 'vendorId' | 'createdAt'>>;
-export type NewSale = Pick<SaleRow, 'vendorId' | 'vendorWalletId' | 'amount' | 'assetCode' | 'assetScale' | 'createdAt'>;
+export type NewSale = Pick<SaleRow, 'vendorId' | 'vendorWalletId' | 'amount' | 'assetCode' | 'assetScale' | 'createdAt'> &
+  Partial<Pick<SaleRow, 'description'>>;
 export type Limits = { perPaymentLimit: bigint; dailyLimit: bigint };
 /** A token rotation passes only the tokens, so the stored grantDailyLimit survives it. */
 export type GrantTokens = { grantAccessToken: string; grantManageUrl: string; grantDailyLimit?: bigint };
@@ -127,6 +135,7 @@ export interface Repo {
   deleteWallet(walletId: string): Promise<void>;
   createSale(input: NewSale): Promise<SaleRow>;
   getSale(id: string): Promise<SaleRow | null>;
+  getSaleByPayCode(payCode: string): Promise<SaleRow | null>;
   updateSale(id: string, patch: SalePatch): Promise<SaleRow>;
   /** Applies `patch` only if the sale is still `from`; the row if it did, null otherwise. */
   transitionSale(id: string, from: SaleStatus, patch: SalePatch): Promise<SaleRow | null>;
@@ -249,6 +258,10 @@ export class PrismaRepo implements Repo {
 
   getSale(id: string) {
     return this.db.sale.findUnique({ where: { id } });
+  }
+
+  getSaleByPayCode(payCode: string) {
+    return this.db.sale.findUnique({ where: { payCode } });
   }
 
   updateSale(id: string, patch: SalePatch) {

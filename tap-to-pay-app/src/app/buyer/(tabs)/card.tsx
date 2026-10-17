@@ -1,5 +1,5 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import {
   Alert,
@@ -80,6 +80,7 @@ const copy = defineCopy(
     cancel: 'Cancelar',
     remove: 'Quitar',
     pickAgain: 'Elegir otro comprador',
+    payByLink: 'Pagar con QR o link',
   },
   {
     walletLabel: (code: string) => `${code} wallet`,
@@ -129,6 +130,7 @@ const copy = defineCopy(
     cancel: 'Cancel',
     remove: 'Remove',
     pickAgain: 'Pick another buyer',
+    payByLink: 'Pay with a QR or link',
   },
 );
 
@@ -137,10 +139,12 @@ const copy = defineCopy(
 export default function CardScreen() {
   const cards = useBuyerCards();
   const { update } = useSession();
+  const router = useRouter();
   const t = useCopy(copy);
   return (
     <Screen onRefresh={cards.reload}>
       <LoadState loading={cards.loading} error={cards.error} hasData={cards.buyer !== undefined} onRetry={cards.reload} />
+      {cards.buyer && <BigButton label={t.payByLink} color={Fill.buyer} onPress={() => router.push('/pay')} />}
       {cards.error?.code === 'BUYER_NOT_FOUND' && (
         <BigButton label={t.pickAgain} color={Fill.buyer} onPress={() => update({ buyerId: null })} />
       )}

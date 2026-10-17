@@ -44,6 +44,8 @@ function Navigation() {
         <Stack.Screen name="vendor/(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="buyer/index" options={{ headerTitle: () => <HeaderTitle title={t.titles.buyer} /> }} />
         <Stack.Screen name="buyer/(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="pay/index" options={{ headerTitle: () => <HeaderTitle title={t.titles.scan} /> }} />
+        <Stack.Screen name="pay/[code]" options={{ headerTitle: () => <HeaderTitle title={t.titles.pay} /> }} />
         <Stack.Screen
           name="debug"
           options={{ headerTitle: () => <HeaderTitle title={t.titles.debug} />, headerRight: undefined }}

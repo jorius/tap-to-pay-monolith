@@ -29,6 +29,11 @@ const deps: Deps = {
   timeZone: cfg.DAILY_LIMIT_TZ,
   pollSeconds: cfg.CHARGE_POLL_SECONDS,
   defaultLimits: { perPaymentLimit: BigInt(cfg.SEED_PER_PAYMENT_LIMIT), dailyLimit: BigInt(cfg.SEED_DAILY_LIMIT) },
+  links: {
+    ttlMinutes: cfg.PAYMENT_LINK_TTL_MINUTES,
+    publicUrl: cfg.PUBLIC_URL,
+    appScheme: cfg.APP_SCHEME,
+  },
 };
 const app = createApp(deps, { clientWalletAddress: cfg.OP_CLIENT_WALLET_ADDRESS });
 

@@ -26,6 +26,7 @@ State as of 2026-10-16, commit `5ce21db`. AI helped with every file of code in t
 | `tap-to-pay-svc/src/open-payments/` | Claude Code | SDK client, errors and interaction hash generated against the `@interledger/open-payments` 7.4.0 type definitions |
 | `tap-to-pay-svc/scripts/` (`seed`, `grant-buyer`, `add-buyer`, `add-wallet`) | Claude Code | Generated from `SDD.md` section 10, step 3, and the multi-wallet design |
 | `tap-to-pay-svc/tests/` | Claude Code | Generated alongside the code; covers the table in `SDD.md` section 13 |
+| Payment links, QR and WhatsApp: `tap-to-pay-svc/src/services/payment-links.ts`, `src/routes/payment-links.ts`, `tests/payment-links.test.ts`, the `payment_links` migration; `tap-to-pay-app/src/app/pay/`, `src/components/vendor/share-sale.tsx`, `src/hooks/use-payment-link.ts`, `src/hooks/use-sale.ts` | Claude Code | Two sessions built it separately (`prompts/qr-whatsapp-pay.txt`, `prompts/payment-links.txt`) and a third merged them: coded and expiring links, the in-app scanner and payment screen, the WhatsApp message, the browser payment page and sales on phones without NFC |
 | `prompts/` | Claude Code | The build prompts were written with Claude from the SDD and the code |
 
 ## Files with little or no AI involvement
@@ -41,6 +42,8 @@ The exact text of the coding prompts we kept as files is in [`prompts/`](prompts
 - [`RAW_initial_prompt.txt`](prompts/RAW_initial_prompt.txt): SDD changes and scaffolding for both folders.
 - [`backend-service.txt`](prompts/backend-service.txt): the build prompt for the first version of the service.
 - [`remove-asset-mismatch.txt`](prompts/remove-asset-mismatch.txt): accept sales between wallets in different assets.
+- [`qr-whatsapp-pay.txt`](prompts/qr-whatsapp-pay.txt): the first QR and WhatsApp payment link, with a browser payment page.
+- [`payment-links.txt`](prompts/payment-links.txt): coded payment links in the service and the app, and the merge of both versions.
 
 Commits made with Claude Code that carry the trailer `Co-Authored-By: Claude …` are listed by `git log --grep "Co-Authored-By: Claude"`.
 

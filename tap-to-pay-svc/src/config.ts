@@ -18,6 +18,12 @@ const schema = z.object({
   // Not validated at startup: an unknown zone fails on the first daily-cap check.
   DAILY_LIMIT_TZ: z.string().min(1).default('America/Bogota'),
   CHARGE_POLL_SECONDS: z.coerce.number().int().positive().default(8),
+  // The public base URL buyers open from the QR and the WhatsApp link (https on a host or tunnel). Unset, it is taken
+  // from the request that created the link, proxy headers (x-forwarded-proto, x-forwarded-host) honoured.
+  PUBLIC_URL: z.string().url().optional(),
+  PAYMENT_LINK_TTL_MINUTES: z.coerce.number().int().positive().default(1440),
+  // The app's URL scheme (tap-to-pay-app/app.json "scheme"); the link page opens <scheme>://pay/<code>.
+  APP_SCHEME: z.string().regex(/^[a-z][a-z0-9+.-]*$/, 'must be a URL scheme').default('taptopayapp'),
 });
 
 export type Config = z.infer<typeof schema>;
