@@ -23,8 +23,8 @@ export type Deps = {
   pollSeconds: number;
   /** Caps a wallet added through the API starts with (SEED_PER_PAYMENT_LIMIT, SEED_DAILY_LIMIT). */
   defaultLimits: Limits;
-  /** Payment links: how long one lives, the base URL to build it on (else the request's host), the app's URL scheme. */
-  links: { ttlMinutes: number; publicBaseUrl?: string; appScheme: string };
+  /** Payment links: how long one lives, the base URL to build it on (else the request's host), where the app opens. */
+  links: { ttlMinutes: number; publicBaseUrl?: string; appLinkBase: string };
 };
 
 const DESCRIPTION_MAX = 140;

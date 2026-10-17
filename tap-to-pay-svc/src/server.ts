@@ -32,7 +32,7 @@ const deps: Deps = {
   links: {
     ttlMinutes: cfg.PAYMENT_LINK_TTL_MINUTES,
     publicBaseUrl: cfg.PUBLIC_BASE_URL,
-    appScheme: cfg.APP_SCHEME,
+    appLinkBase: cfg.APP_LINK_BASE,
   },
 };
 const app = createApp(deps, { clientWalletAddress: cfg.OP_CLIENT_WALLET_ADDRESS });

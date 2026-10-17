@@ -405,7 +405,7 @@ export function makeDeps(overrides: Partial<Deps> = {}) {
     timeZone: 'America/Bogota',
     pollSeconds: 8,
     defaultLimits: { perPaymentLimit: 2000n, dailyLimit: 5000n },
-    links: { ttlMinutes: 60, publicBaseUrl: PUBLIC_BASE_URL, appScheme: 'taptopayapp' },
+    links: { ttlMinutes: 60, publicBaseUrl: PUBLIC_BASE_URL, appLinkBase: 'taptopayapp://' },
     ...overrides,
   };
   return { deps, repo, op };

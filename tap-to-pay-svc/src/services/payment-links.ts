@@ -68,7 +68,9 @@ export function publicUrl(baseUrl: string, code: string): string {
 }
 
 function appUrl(deps: Deps, code: string): string {
-  return `${deps.links.appScheme}://pay/${code}`;
+  // taptopayapp:// + pay/<code>, or exp://<ip>:8081/-- + /pay/<code> for Expo Go.
+  const base = deps.links.appLinkBase;
+  return base.endsWith('/') ? `${base}pay/${code}` : `${base}/pay/${code}`;
 }
 
 async function loadByCode(deps: Deps, code: string): Promise<SaleRow> {
@@ -211,7 +213,7 @@ const text = {
     paid: 'Este cobro ya fue pagado.',
     expired: 'Este link venció. Pide al vendedor uno nuevo.',
     unavailable: 'Este cobro ya no se puede pagar.',
-    noApp: 'Si el botón no abre nada, instala la app Tap to Pay y vuelve a abrir este link.',
+    noApp: '¿No se abrió la app? Abre Tap to Pay → Tarjeta → Pagar con QR o link, y pega este código:',
     notFound: 'Link de pago no encontrado',
   },
   en: {
@@ -237,7 +239,7 @@ const text = {
     paid: 'This payment has already been made.',
     expired: 'This link has expired. Ask the vendor for a new one.',
     unavailable: 'This payment can no longer be made.',
-    noApp: 'If the button does nothing, install the Tap to Pay app and open this link again.',
+    noApp: "The app didn't open? Open Tap to Pay → Card → Pay with a QR or link, and paste this code:",
     notFound: 'Payment link not found',
   },
 } as const;
@@ -258,7 +260,7 @@ function renderPage(args: { lang: LinkLang; title?: string; view?: PaymentReques
           ? `<p class="note">${esc(t.expired)}</p>`
           : view.status !== 'AWAITING_TAP'
             ? `<p class="note">${esc(t.unavailable)}</p>`
-            : `<a class="pay" href="${esc(args.appUrl!)}">${esc(t.open)}</a><p class="hint">${esc(t.noApp)}</p>`;
+            : `<a class="pay" href="${esc(args.appUrl!)}">${esc(t.open)}</a><p class="hint">${esc(t.noApp)}</p><p class="code">${esc(view.code)}</p>`;
     body = `<p class="vendor">${esc(view.vendorName)}</p>
 <p class="amount">${esc(amount)}</p>
 ${view.description ? `<p class="concept">${esc(view.description)}</p>` : ''}
@@ -279,6 +281,7 @@ main{background:#fff;border-radius:16px;padding:28px 24px;max-width:360px;width:
 .vendor{margin:0;color:#555}.amount{margin:8px 0;font-size:2.2rem;font-weight:700}.concept{margin:0 0 16px;color:#333}
 .pay{display:block;margin-top:16px;padding:14px;border-radius:12px;background:#6B2FB3;color:#fff;text-decoration:none;font-weight:600}
 .hint,.note{font-size:.9rem;color:#666}
+.code{font-family:ui-monospace,monospace;font-size:1.3rem;letter-spacing:.05em;background:#f1f1f4;border-radius:8px;padding:10px;user-select:all;-webkit-user-select:all}
 </style>
 </head>
 <body><main>

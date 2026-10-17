@@ -21,8 +21,13 @@ const schema = z.object({
   // Payment links (WhatsApp and QR). Without PUBLIC_BASE_URL a link is built from the host of the request that made it.
   PUBLIC_BASE_URL: z.string().url().optional(),
   PAYMENT_LINK_TTL_MINUTES: z.coerce.number().int().positive().default(1440),
-  // The app's URL scheme (tap-to-pay-app/app.json "scheme"); the link page opens <scheme>://pay/<code>.
-  APP_SCHEME: z.string().regex(/^[a-z][a-z0-9+.-]*$/, 'must be a URL scheme').default('taptopayapp'),
+  // Where the link page's button opens the app: the app's scheme for a development or release build
+  // (tap-to-pay-app/app.json "scheme"), or Metro's address for Expo Go, e.g. exp://192.168.1.16:8081/--. The button
+  // opens <APP_LINK_BASE>/pay/<code>.
+  APP_LINK_BASE: z
+    .string()
+    .regex(/^[a-z][a-z0-9+.-]*:\/\//, 'must start with a URL scheme, e.g. taptopayapp:// or exp://<ip>:8081/--')
+    .default('taptopayapp://'),
 });
 
 export type Config = z.infer<typeof schema>;

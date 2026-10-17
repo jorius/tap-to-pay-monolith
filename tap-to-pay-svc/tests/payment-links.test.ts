@@ -195,6 +195,14 @@ describe('paying a link', () => {
 });
 
 describe('the link page', () => {
+  it('opens Expo Go when APP_LINK_BASE is Metro', async () => {
+    const ctx = setup();
+    ctx.deps.links = { ...ctx.deps.links, appLinkBase: 'exp://192.168.1.16:8081/--' };
+    const { link } = await saleWithLink(ctx);
+    expect(link.appUrl).toBe(`exp://192.168.1.16:8081/--/pay/${link.code}`);
+    expect((await paymentLinkPage(ctx.deps, link.code, 'es')).html).toContain(`href="exp://192.168.1.16:8081/--/pay/${link.code}"`);
+  });
+
   it('previews the charge and opens the app, escaping what the vendor typed', async () => {
     const ctx = setup();
     const { link } = await saleWithLink(ctx, '<b>Pan</b> & "café"');
@@ -202,6 +210,7 @@ describe('the link page', () => {
     expect(page.status).toBe(200);
     expect(page.html).toContain('<meta property="og:title" content="Cobro de Tienda: 12.00 USD">');
     expect(page.html).toContain(`href="taptopayapp://pay/${link.code}"`);
+    expect(page.html).toContain(`<p class="code">${link.code}</p>`);
     expect(page.html).toContain('&lt;b&gt;Pan&lt;/b&gt; &amp; &quot;café&quot;');
     expect(page.html).not.toContain('<b>Pan</b>');
   });
